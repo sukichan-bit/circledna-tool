@@ -336,8 +336,10 @@ function shopifyCsvToOrders(text){
     shipName: idx("Shipping Name"), shipAddr1: idx("Shipping Address1"), shipAddr2: idx("Shipping Address2"),
     shipCompany: idx("Shipping Company"), shipCity: idx("Shipping City"), shipZip: idx("Shipping Zip"),
     shipProvince: idx("Shipping Province"), shipCountry: idx("Shipping Country"), shipPhone: idx("Shipping Phone"),
-    cancelledAt: idx("Cancelled at"), noteAttributes: idx("Note Attributes")
+    cancelledAt: idx("Cancelled at"), noteAttributes: idx("Note Attributes"),
+    discountCode: idx("Discount Code"), shippingMethod: idx("Shipping Method")
   };
+  SHOPIFY_RAW_HEADER = header;
   const orders = {}; // Name -> order
   for(let r=1;r<rows.length;r++){
     const row = rows[r];
@@ -352,10 +354,12 @@ function shopifyCsvToOrders(text){
         shipName: row[col.shipName]||"", shipAddr1: row[col.shipAddr1]||"", shipAddr2: row[col.shipAddr2]||"",
         shipCompany: row[col.shipCompany]||"", shipCity: row[col.shipCity]||"", shipZip: (row[col.shipZip]||"").replace(/^'/,""),
         shipProvince: row[col.shipProvince]||"", shipCountry: (row[col.shipCountry]||"").trim(), shipPhone: row[col.shipPhone]||"",
-        lines: []
+        discountCode: row[col.discountCode]||"", shippingMethod: row[col.shippingMethod]||"",
+        lines: [], rawRows: []
       };
     }
     const o = orders[name];
+    o.rawRows.push(row); // exact original row(s), for replicating the raw Shopify export format 1:1
     const sku = (row[col.lineSku]||"").trim();
     const qty = parseInt(row[col.lineQty]||"0",10) || 0;
     if(sku){
@@ -368,6 +372,7 @@ function shopifyCsvToOrders(text){
   }
   return orders; // keyed by order Name e.g. "DNA-15274"
 }
+let SHOPIFY_RAW_HEADER = null;
 
 /* ======================================================================
    D365 WORKBOOK PARSER
@@ -668,18 +673,60 @@ function buildJobOrderExport(records){
   return rows;
 }
 
-function buildIssuesExport(records){
-  const detail = [["Shopify reference","Sales order","Route","Reasons","Recipient Name","Country","Resolution status","Operator notes"]];
-  const paymentExceptions = [["Name","Email","Financial Status","Total","Shipping Name","Shipping Country"]];
+// "Shopify on hold orders" tab format — confirmed 2026-09-15 against the live
+// On Hold Order Google Sheet: same 40-col shipment-style layout as the other
+// FedEx-family templates, plus Discount Code + Shipping Method (both pulled
+// straight from Shopify), plus Route + Reason appended per the user's request.
+const SHOPIFY_ON_HOLD_HEADER = ["Transaction ID","Sender Code","Service Type","Packaging","Weight Type",
+  "Transportation Payment Type","Payer Account Number","Duty / Tax Payment Type","Duty / Tax Payer Account Number",
+  "Number of Package","Currency","Shipment Reference","Recipient Contact Name","Recipient Address Line 1",
+  "Recipient Address Line 2","Recipient City","Recipient Country Code","Recipient Zip Code","Recipient Tel No.",
+  "Recipient Email Address","Description 1","HS Code","Country of Manufacture 1","Quantity 1","Unit Value 1",
+  "Unit of Measure 1","Print of Commercial Invoice","Terms of Sale","ETD Indicator","Sender account number",
+  "Purpose of Shipment","Return Reason","Print Return Instruction","Null Field","AES TYPE","FTR","TAX ID",
+  "Recipient Delivery Alert Flag","Discount Code","Shipping Method","Route","Reason"];
+function buildShopifyOnHoldExport(records){
+  const rc = CONFIG.fedexRouteConfig["INTL-FEDEX"];
+  const rows = [SHOPIFY_ON_HOLD_HEADER];
   for(const rec of records.filter(r=>r.status==="HOLD" && effStatus(r)==="HOLD")){
     const so = rec.shopify, d = rec.d365;
-    detail.push([d.shopifyRef, d.salesOrder, rec.route||"", rec.issues.join(" | "),
-      so?so.shipName:"", rec.country||"", "Open", rec.override.note||""]);
-    if(so && (so.financialStatus === "pending" || so.financialStatus === "expired" || so.cancelledAt)){
-      paymentExceptions.push([so.name, so.email, so.cancelledAt ? "cancelled" : so.financialStatus, "", so.shipName, so.shipCountry]);
+    const qty = Math.max(rec.kitQty||1, 1);
+    for(let k=0;k<qty;k++){
+      rows.push([
+        d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "Circle Exome Premium",
+        so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country||"",
+        textSafe(so?so.shipZip:""), so?normalizePhoneForFedex(so.shipPhone, rec.country):"", so?so.email:"",
+        rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
+        rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", so?extractTaxId(so):"", "Y",
+        so?so.discountCode:"", so?so.shippingMethod:"",
+        rec.route||"", rec.issues.join(" | ")
+      ]);
     }
   }
-  return [["Issue detail", detail], ["Payment exceptions", paymentExceptions], ["D365 action list", buildD365ActionList(records)]];
+  return rows;
+}
+// "Expired orders in Shopify (Check everyday)" tab format — an exact replica
+// of the raw Shopify export (same 81 columns), one row per original CSV row
+// for each held-for-payment order, not a re-derived summary.
+function buildExpiredOrdersShopifyExport(records){
+  const rows = [SHOPIFY_RAW_HEADER || []];
+  const seen = new Set();
+  for(const rec of records.filter(r=>r.status==="HOLD" && effStatus(r)==="HOLD")){
+    const so = rec.shopify;
+    if(so && (so.financialStatus === "pending" || so.financialStatus === "expired" || so.cancelledAt) && !seen.has(so.name)){
+      seen.add(so.name);
+      rows.push(...so.rawRows);
+    }
+  }
+  return rows;
+}
+
+function buildIssuesExport(records){
+  return [
+    ["Shopify on hold orders", buildShopifyOnHoldExport(records)],
+    ["Expired orders in Shopify", buildExpiredOrdersShopifyExport(records)],
+    ["D365 action list", buildD365ActionList(records)]
+  ];
 }
 
 function buildD365ActionList(records){
@@ -1065,7 +1112,7 @@ function renderExport(){
   const items = [
     { key:"sf", label:`HK–SF: ${date} orders for SF.xlsx`, build:()=>[["test", buildSfExport(STATE.records, CONFIG)]] },
     { key:"joborders", label:`Job orders 2026: Job orders ${date}.xlsx`, build:()=>[["D365", buildJobOrderExport(STATE.records)]] },
-    { key:"issues", label:`Issues: Issue orders ${date}.xlsx (Issue detail / Payment exceptions / D365 action list tabs)`, build:()=>buildIssuesExport(STATE.records) },
+    { key:"issues", label:`Issues: Issue orders ${date}.xlsx — paste tabs directly into the On Hold Order sheet (Shopify on hold orders / Expired orders in Shopify / D365 action list)`, build:()=>buildIssuesExport(STATE.records) },
     { key:"myfedex", label:`MY–FedEx: MY Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildMyFedexExport(STATE.records)]] },
     { key:"usfedex", label:`US–FedEx: US Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildUsFedexExport(STATE.records)]] },
     { key:"intlfedex", label:`Intl–FedEx: Intl Circle Exome Orders ${date}.xlsx`, build:()=>[["Sheet1", buildIntlFedexExport(STATE.records)]] },
@@ -1133,6 +1180,7 @@ function renderConfig(){
       <li>DHL orders don't get the FedEx 4-kit shipment split — every kit of a DHL order shares one shipment reference</li>
       <li>FedEx split: fill to 4 kits/shipment, rebalance the last two shipments to avoid a 1-kit remainder</li>
       <li>D365 "move out of queue" = action list only in v1, no automatic D365 writes</li>
+      <li>Issues workbook tabs are named to match the live On Hold Order Google Sheet exactly, for direct copy-paste: "Shopify on hold orders" (40-col shipment layout + Route/Reason columns appended) and "Expired orders in Shopify" (exact replica of the raw Shopify export row(s), not a re-derived summary)</li>
     </ul>`;
 }
 
