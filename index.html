@@ -220,11 +220,10 @@ const DEFAULT_CONFIG = {
     "PRE-FG-000021": "CIRCLE EXOME PREMIUM"
   },
   manualFedexNotes: {
-    ID: "Highlight: special template required",
-    KR: "SUSPENDED — do not ship. Country reference marks KR as suspended; hold and flag to Ops.",
-    IN: "Highlight: return LOA and outbound Important Note required",
-    PH: "Highlight: UPS return label/documents required",
-    JP: "Standard manual FedEx handling"
+    ID: "Outbound + return labels both generated (FedEx Outbound ID-JP-PH / FedEx Return tabs)",
+    IN: "Outbound uses a separate template (FedEx Outbound IN tab); return label generated too (FedEx Return tab)",
+    JP: "Outbound + return labels both generated (FedEx Outbound ID-JP-PH / FedEx Return tabs)",
+    PH: "Outbound label generated; return label is NOT automated — generate manually via the UPS website"
   },
   dhlReturnFields: {
     AE: { purpose: "Sample", desc: "Exempt Human Specimen Not restricted as per IATA DGR section 3.6.2.2.3.8" },
@@ -248,8 +247,23 @@ const DEFAULT_CONFIG = {
     "MY-FEDEX": { description: "Empty Tube For sample collection and not for diagnostic", hsCode: "3926.90.9900", countryOfManufacture: "HK", purposeOfShipment: 1 },
     "US-FEDEX": { description: "Empty and unused plastic tube for DNA/RNA collection (for personal use only FDA IUC 100.000)(HTS:3926.90.99.10  MID:USPUR31GUI)", hsCode: 39269090, countryOfManufacture: "US", purposeOfShipment: 3,
       mid: "Puritan Medical Products Co LLC Manufacturer Address: 31 School Street, P.O.Box 149, Guilford, Maine 04443, USA." },
-    // No confirmed reference template for Manual-FedEx (ID/IN/JP/PH) — defaulting to the Intl config until confirmed.
-    "MANUAL-FEDEX": { description: "Plastic Tube in Paper Box", hsCode: 39269090, countryOfManufacture: "HK", purposeOfShipment: 1 }
+  },
+  // Manual-FedEx (ID/IN/JP/PH): outbound + return templates from Krista, confirmed 2026-09-15.
+  // ID/JP/PH outbound share one EasyTrans020 profile ("A", 39 cols); IN outbound uses a
+  // different one ("B", 40 cols incl. TAX ID) — the two can't share one sheet since the
+  // underlying EDI system maps fields by column POSITION, not by header text.
+  manualFedexOutboundProfiles: {
+    ID: { sheet:"A", senderCode:"Circle3", description:"Plastic Tube in Paper Box", hsCode:39269090, countryOfManufacture:"HK", purposeOfShipment:"1", returnReason:"5", ftr:"2" },
+    JP: { sheet:"A", senderCode:"Circle3", description:"Plastic Tube in Paper Box", hsCode:39269090, countryOfManufacture:"HK", purposeOfShipment:"1", returnReason:"5", ftr:"2" },
+    PH: { sheet:"A", senderCode:"Circle3", description:"Plastic Tube in Paper Box", hsCode:39269090, countryOfManufacture:"HK", purposeOfShipment:"1", returnReason:"5", ftr:"2" },
+    IN: { sheet:"B", senderCode:"Circle4", description:"Commercial Invoice is for service only and plastic tube in paper box is free of charge", hsCode:39269090, countryOfManufacture:"HK", purposeOfShipment:"2", returnReason:"5", ftr:"NO EEI 30.37(a)" }
+  },
+  // Return labels (all share one 44-col template — only fixed values differ). PH has no
+  // entry: the user generates PH return labels manually via the UPS website.
+  manualFedexReturnProfiles: {
+    ID: { senderCode:"Circle2", description:"plastic tubes in paper box", unitValue:5, commodityWeight:0.4, purposeOfShipment:"2", returnReason:"9" },
+    JP: { senderCode:"Circle3", description:"plastic tube in paper box", unitValue:5, commodityWeight:0.3, purposeOfShipment:"5", returnReason:"5" },
+    IN: { senderCode:"Circle3", description:"plastic tube in paper box", unitValue:5, commodityWeight:0.3, purposeOfShipment:"2", returnReason:"9" }
   },
   callingCodes: {
     HK:"852",MY:"60",US:"1",CA:"1",GB:"44",NL:"31",AU:"61",NZ:"64",SG:"65",CN:"86",TW:"886",JP:"81",KR:"82",
@@ -665,7 +679,7 @@ function buildIssuesExport(records){
       paymentExceptions.push([so.name, so.email, so.cancelledAt ? "cancelled" : so.financialStatus, "", so.shipName, so.shipCountry]);
     }
   }
-  return [["Issue detail", detail], ["Payment exceptions", paymentExceptions]];
+  return [["Issue detail", detail], ["Payment exceptions", paymentExceptions], ["D365 action list", buildD365ActionList(records)]];
 }
 
 function buildD365ActionList(records){
@@ -702,34 +716,106 @@ const FEDEX_HEADER_US = [...FEDEX_HEADER_MY, "MID"];
 // templates' full E.164-ish phone. We add 3 more columns on the end so one
 // shared layout covers both the FedEx and DHL tabs.
 const MANUAL_BASE_HEADER = [...FEDEX_HEADER_MY, null, null, "Barcode"];
-const MANUAL_HEADER = [...MANUAL_BASE_HEADER, "Required handling", "Return purpose", "Return description"];
+const MANUAL_DHL_HEADER = [...MANUAL_BASE_HEADER, "Return purpose", "Return description"];
 function normalizePhoneForManual(rawPhone){
   let p = String(rawPhone||"").replace(/[^\d]/g,"");
   if(p.startsWith("0")) p = p.slice(1);
   return p;
 }
 function buildManualRows(records, route){
-  const rc = CONFIG.fedexRouteConfig[route] || CONFIG.fedexRouteConfig["INTL-FEDEX"];
-  const rows = [MANUAL_HEADER];
+  const rc = CONFIG.fedexRouteConfig["INTL-FEDEX"];
+  const rows = [MANUAL_DHL_HEADER];
   // Plan explicitly excludes DHL from the FedEx 4-kit shipment split — every
   // kit of a DHL order shares one shipment reference regardless of count.
-  const splitFn = route === "MANUAL-DHL" ? (qty)=>[qty] : splitFedexQty;
   for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route===route)){
     const so = rec.shopify, d = rec.d365;
-    const shipments = splitFn(rec.kitQty);
-    const handlingNote = route==="MANUAL-FEDEX" ? (CONFIG.manualFedexNotes[rec.country]||"") : "";
-    const dhl = route==="MANUAL-DHL" ? (CONFIG.dhlReturnFields[rec.country]||{purpose:"",desc:""}) : {purpose:"",desc:""};
+    const dhl = CONFIG.dhlReturnFields[rec.country] || {purpose:"",desc:""};
+    for(let k=0;k<rec.kitQty;k++){
+      rows.push([
+        d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "Circle Exome Premium",
+        so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country||"",
+        textSafe(so?so.shipZip:""), normalizePhoneForManual(so?so.shipPhone:""), so?so.email:"",
+        rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
+        rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y",
+        "", "", "",
+        dhl.purpose, dhl.desc
+      ]);
+    }
+  }
+  return rows;
+}
+
+/* ---- Manual-FedEx (ID/IN/JP/PH): real per-country outbound + return templates ---- */
+const MANUAL_FEDEX_OUTBOUND_HEADER_A = ["Transaction ID","Sender Code","Service Type","Return Packaging","Weight Type",
+  "Transportation Payment Type","Payer Account Number","Duty / Tax Payment Type","Duty / Tax Payer Account Number",
+  "Number of Packages","Currency","Shipment Reference","Recipient Contact Name","Recipient Address Line 1",
+  "Recipient Address Line 2","Recipient City","Recipient Country Code","Recipient Zip Code","Recipient Tel No.",
+  "Recipient email address","Description 1","HS code","Country of Manufacture 1","Quantity 1","Unit Value 1",
+  "Unit of Measure 1","Print Commercial Invoice","Terms of Sale","ETD Indicator","Sender account number",
+  "Purpose Of Shipment","Return Reason","Print Return Instruction","AES TYPE","FTR","Company Name","Email Alert",
+  "A Null Field","Note"];
+const MANUAL_FEDEX_OUTBOUND_HEADER_B = ["Transaction ID","Sender Code","Service Type","Return Packaging","Weight Type",
+  "Transportation Payment Type","Payer Account Number","Duty / Tax Payment Type","Duty / Tax Payer Account Number",
+  "Number of Packages","Currency","Shipment Reference","Recipient Contact Name","Recipient Address Line 1",
+  "Recipient Address Line 2","Recipient City","Recipient Country Code","Recipient Zip Code","Recipient Tel No.",
+  "Recipient email address","Description 1","HS code","Country of Manufacture 1","Quantity 1","Unit Value 1",
+  "Unit of Measure 1","Print Commercial Invoice","Terms of Sale","ETD Indicator","Sender account number",
+  "Purpose Of Shipment","Return Reason","Print Return Instruction","Company Name","AES TYPE","FTR","TAX ID",
+  "Email Alert","A Null Field","Note"];
+const MANUAL_FEDEX_RETURN_HEADER = ["Transaction ID","Sender Code","Service Type","Return Packaging","Weight Type",
+  "Transportation Payment Type","Payer Account Number","Duty / Tax Payment Type","Duty / Tax Payer Account Number",
+  "Number of Packages","Currency","Shipment Reference","Recipient Contact Name","Recipient Address Line 1",
+  "Recipient Address Line 2","Recipient City","Recipient Country Code","Recipient Zip Code","Recipient Tel No.",
+  "Recipient email address","Description 1","HS code","Country of Manufacture 1","Quantity 1","Unit Value 1",
+  "Unit of Measure 1","Commodity Weight","Weight Measurement","Recipient Address","Print Commercial Invoice",
+  "Terms of Sale","ETD Indicator","Sender account number","Purpose Of Shipment","Return Reason","Term of Sale",
+  "Commodity Weight","Weight Type","Print Return Instruction","AES TYPE","FTR","Recipient IRS/EIN Number",
+  "Company Name","A Null Field"];
+
+function buildManualFedexOutboundRows(records, countries, sheetProfile){
+  const header = sheetProfile==="A" ? MANUAL_FEDEX_OUTBOUND_HEADER_A : MANUAL_FEDEX_OUTBOUND_HEADER_B;
+  const rows = [header];
+  for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route==="MANUAL-FEDEX" && countries.includes(r.country))){
+    const so = rec.shopify, d = rec.d365;
+    const p = CONFIG.manualFedexOutboundProfiles[rec.country];
+    const shipments = splitFedexQty(rec.kitQty);
+    shipments.forEach((qty, sIdx)=>{
+      const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
+      for(let k=0;k<qty;k++){
+        const base = [
+          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
+          so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country,
+          textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
+          p.description, p.hsCode, p.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
+          p.purposeOfShipment, p.returnReason, "N"
+        ];
+        if(sheetProfile==="A") rows.push([...base, "0", p.ftr, "", "Y", "", ""]);
+        else rows.push([...base, "", "0", p.ftr, extractTaxId(so), "Y", "", ""]);
+      }
+    });
+  }
+  return rows;
+}
+function buildManualFedexOutboundA(records){ return buildManualFedexOutboundRows(records, ["ID","JP","PH"], "A"); }
+function buildManualFedexOutboundB(records){ return buildManualFedexOutboundRows(records, ["IN"], "B"); }
+
+function buildManualFedexReturnRows(records){
+  const rows = [MANUAL_FEDEX_RETURN_HEADER];
+  // PH has no return profile — those labels are generated manually via the UPS website.
+  for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route==="MANUAL-FEDEX" && CONFIG.manualFedexReturnProfiles[r.country])){
+    const so = rec.shopify, d = rec.d365;
+    const p = CONFIG.manualFedexReturnProfiles[rec.country];
+    const shipments = splitFedexQty(rec.kitQty);
     shipments.forEach((qty, sIdx)=>{
       const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
       for(let k=0;k<qty;k++){
         rows.push([
-          txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "Circle Exome Premium",
-          so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country||"",
-          textSafe(so?so.shipZip:""), normalizePhoneForManual(so?so.shipPhone:""), so?so.email:"",
-          rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
-          rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y",
-          "", "", "",
-          handlingNote, dhl.purpose, dhl.desc
+          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
+          so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country,
+          textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
+          p.description, 39269090, "HK", 1, p.unitValue, "Pcs", p.commodityWeight, "KGS", "Prenetics Limited",
+          "Y", "6", "Y", "661486660", p.purposeOfShipment, p.returnReason, "4", p.commodityWeight, "KGS", "N",
+          "0", "NO EEI 30.37(a)", "", "", ""
         ]);
       }
     });
@@ -737,7 +823,7 @@ function buildManualRows(records, route){
   return rows;
 }
 
-function fedexRows(records, route, header, includeMid, includeNote){
+function fedexRows(records, route, header, includeMid){
   const rc = CONFIG.fedexRouteConfig[route];
   const rows = [header];
   for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route===route)){
@@ -754,17 +840,15 @@ function fedexRows(records, route, header, includeMid, includeNote){
           rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y"
         ];
         if(includeMid) row.push(rc.mid || "");
-        if(includeNote) row.push(cfgNote(route, rec.country));
         rows.push(row);
       }
     });
   }
   return rows;
 }
-function buildIntlFedexExport(records){ return fedexRows(records, "INTL-FEDEX", FEDEX_HEADER_INTL, false, false); }
-function buildMyFedexExport(records){ return fedexRows(records, "MY-FEDEX", FEDEX_HEADER_MY, false, false); }
-function buildUsFedexExport(records){ return fedexRows(records, "US-FEDEX", FEDEX_HEADER_US, true, false); }
-function buildManualFedexExport(records){ return buildManualRows(records, "MANUAL-FEDEX"); }
+function buildIntlFedexExport(records){ return fedexRows(records, "INTL-FEDEX", FEDEX_HEADER_INTL, false); }
+function buildMyFedexExport(records){ return fedexRows(records, "MY-FEDEX", FEDEX_HEADER_MY, false); }
+function buildUsFedexExport(records){ return fedexRows(records, "US-FEDEX", FEDEX_HEADER_US, true); }
 function buildManualDhlExport(records){ return buildManualRows(records, "MANUAL-DHL"); }
 
 /* ======================================================================
@@ -919,11 +1003,12 @@ function renderReviewTable(){
       const pillClass = eff==="READY" ? "ready" : "hold";
       const overridden = r.status==="HOLD" && eff==="READY";
       const label = overridden ? "READY (released)" : eff;
+      const manualNote = r.route==="MANUAL-FEDEX" ? (CONFIG.manualFedexNotes[r.country]||"") : "";
       return `<tr>
         <td>${r.d365.shopifyRef}</td><td>${r.d365.salesOrder}</td><td>${r.d365.itemNumber}</td>
         <td>${r.kitQty}</td><td>${r.country||"—"}</td><td>${r.route||"—"}</td>
         <td><span class="pill ${pillClass}">${label}</span></td>
-        <td>${r.issues.map(i=>`<span class="tag">${i}</span>`).join("")}${r.override.note?`<span class="tag" style="background:var(--ok-bg);color:var(--ok)">note: ${r.override.note}</span>`:""}</td>
+        <td>${r.issues.map(i=>`<span class="tag">${i}</span>`).join("")}${r.override.note?`<span class="tag" style="background:var(--ok-bg);color:var(--ok)">note: ${r.override.note}</span>`:""}${manualNote?`<span class="tag" style="background:#eef1ff;color:#3949ab">${manualNote}</span>`:""}</td>
       </tr>`;
     }).join("");
   }
@@ -980,13 +1065,17 @@ function renderExport(){
   const items = [
     { key:"sf", label:`HK–SF: ${date} orders for SF.xlsx`, build:()=>[["test", buildSfExport(STATE.records, CONFIG)]] },
     { key:"joborders", label:`Job orders 2026: Job orders ${date}.xlsx`, build:()=>[["D365", buildJobOrderExport(STATE.records)]] },
-    { key:"issues", label:`Issues: Issue orders ${date}.xlsx`, build:()=>buildIssuesExport(STATE.records) },
-    { key:"d365action", label:`D365 action list: D365 action list ${date}.xlsx`, build:()=>[["Action list", buildD365ActionList(STATE.records)]] },
+    { key:"issues", label:`Issues: Issue orders ${date}.xlsx (Issue detail / Payment exceptions / D365 action list tabs)`, build:()=>buildIssuesExport(STATE.records) },
     { key:"myfedex", label:`MY–FedEx: MY Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildMyFedexExport(STATE.records)]] },
     { key:"usfedex", label:`US–FedEx: US Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildUsFedexExport(STATE.records)]] },
     { key:"intlfedex", label:`Intl–FedEx: Intl Circle Exome Orders ${date}.xlsx`, build:()=>[["Sheet1", buildIntlFedexExport(STATE.records)]] },
-    { key:"manual", label:`Manual fulfillment: Manual fulfillment orders ${date}.xlsx (FedEx + DHL tabs)`,
-      build:()=>[["FedEx", buildManualFedexExport(STATE.records)], ["DHL", buildManualDhlExport(STATE.records)]] },
+    { key:"manual", label:`Manual fulfillment: Manual fulfillment orders ${date}.xlsx (FedEx Outbound ID/JP/PH, FedEx Outbound IN, FedEx Return, DHL tabs — PH return is manual via the UPS website, not in this file)`,
+      build:()=>[
+        ["FedEx Outbound (ID-JP-PH)", buildManualFedexOutboundA(STATE.records)],
+        ["FedEx Outbound (IN)", buildManualFedexOutboundB(STATE.records)],
+        ["FedEx Return", buildManualFedexReturnRows(STATE.records)],
+        ["DHL", buildManualDhlExport(STATE.records)]
+      ] },
   ];
   document.getElementById("exportList").innerHTML = items.map(it=>`
     <div class="row" style="align-items:center;border-bottom:1px solid var(--border);padding:9px 0;">
@@ -1040,7 +1129,7 @@ function renderConfig(){
       <li>Job order Tax ID: extracted from a Shopify Note Attributes line whose key contains "tax" — no dedicated Shopify export column exists for this, confirm the real attribute name if it's not being picked up</li>
       <li>Job order phone/zip: prefixed with ' when they start with 0, so pasting into Google Sheets doesn't drop the leading zero</li>
       <li>MY/US/Intl-FedEx exports now use the real decrypted templates (field-for-field, one row per kit)</li>
-      <li>Manual fulfillment is one workbook with FedEx and DHL tabs, both using the confirmed manual-fulfillment layout (41 base columns + Required handling / Return purpose / Return description) — phone here has no country calling code, unlike the automated MY/US/Intl templates</li>
+      <li>Manual fulfillment workbook has 4 tabs: FedEx Outbound (ID/JP/PH share one template), FedEx Outbound (IN, a different template), FedEx Return (ID/JP/IN share one template with per-country Purpose/Return Reason), and DHL. PH has no automated return — generated manually via the UPS website.</li>
       <li>DHL orders don't get the FedEx 4-kit shipment split — every kit of a DHL order shares one shipment reference</li>
       <li>FedEx split: fill to 4 kits/shipment, rebalance the last two shipments to avoid a 1-kit remainder</li>
       <li>D365 "move out of queue" = action list only in v1, no automatic D365 writes</li>
