@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CircleDNA Order Conversion Tool</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --ink:#1b1f27; --muted:#6b7280; --border:#e2e5eb;
+    --accent:#2f6feb; --accent-ink:#ffffff; --ok:#1a8754; --warn:#b45309; --bad:#c0342a;
+    --ok-bg:#e8f7ee; --warn-bg:#fdf3e3; --bad-bg:#fbe9e7; --hold-bg:#fff4e5;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  header{background:var(--panel);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  header h1{font-size:17px;margin:0;font-weight:700;}
+  header .sub{color:var(--muted);font-size:12.5px;}
+  nav{display:flex;gap:4px;padding:10px 20px 0;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  nav button{border:none;background:transparent;padding:10px 14px;font-size:13.5px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font-weight:600;}
+  nav button.active{color:var(--accent);border-bottom-color:var(--accent);}
+  nav button .badge{background:var(--bad);color:#fff;border-radius:10px;font-size:10.5px;padding:1px 6px;margin-left:6px;}
+  main{padding:20px;max-width:1400px;margin:0 auto;}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
+  .panel h2{margin:0 0 4px;font-size:15px;}
+  .panel .hint{color:var(--muted);font-size:12.5px;margin-bottom:12px;}
+  .row{display:flex;gap:14px;flex-wrap:wrap;}
+  .col{flex:1;min-width:260px;}
+  .dropzone{border:2px dashed var(--border);border-radius:8px;padding:22px;text-align:center;cursor:pointer;background:#fafbfc;transition:.15s;}
+  .dropzone:hover{border-color:var(--accent);background:#f1f6ff;}
+  .dropzone.filled{border-style:solid;border-color:var(--ok);background:var(--ok-bg);}
+  .dropzone input{display:none;}
+  .dropzone .fname{font-weight:600;font-size:13px;margin-top:6px;word-break:break-all;}
+  .dropzone .ftype{color:var(--muted);font-size:12px;}
+  button.btn{background:var(--accent);color:var(--accent-ink);border:none;border-radius:6px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;}
+  button.btn:disabled{background:#c7cdd6;cursor:not-allowed;}
+  button.btn.secondary{background:#eef1f5;color:var(--ink);}
+  button.btn.danger{background:var(--bad);}
+  button.btn.small{padding:5px 10px;font-size:12px;}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;}
+  table th{text-align:left;background:#f4f5f7;padding:7px 9px;border-bottom:1px solid var(--border);white-space:nowrap;position:sticky;top:0;}
+  table td{padding:6px 9px;border-bottom:1px solid #eef0f3;vertical-align:top;}
+  .tablewrap{max-height:520px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;}
+  .pill.ready{background:var(--ok-bg);color:var(--ok);}
+  .pill.hold{background:var(--hold-bg);color:var(--warn);}
+  .pill.manual{background:#eef1ff;color:#3949ab;}
+  .pill.route-hk{background:#e6f4ff;color:#0b6bcb;}
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;}
+  .stat{background:#fafbfc;border:1px solid var(--border);border-radius:8px;padding:12px;}
+  .stat .n{font-size:22px;font-weight:700;}
+  .stat .l{color:var(--muted);font-size:11.5px;}
+  .tag{display:inline-block;background:#eef1f5;border-radius:5px;padding:1px 6px;font-size:10.5px;margin:1px 3px 1px 0;color:var(--muted);}
+  textarea, input[type=text]{width:100%;font-family:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;}
+  .flexend{display:flex;justify-content:flex-end;gap:8px;}
+  .muted{color:var(--muted);}
+  .issue-list{list-style:none;margin:0;padding:0;}
+  .issue-list li{padding:2px 0;font-size:12px;}
+  code{background:#f1f2f4;padding:1px 5px;border-radius:4px;font-size:11.5px;}
+  .toast{position:fixed;bottom:18px;right:18px;background:#1b1f27;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;z-index:50;opacity:0;transition:.2s;pointer-events:none;}
+  .toast.show{opacity:1;}
+  details.cfg summary{cursor:pointer;font-weight:600;font-size:13px;margin:10px 0 6px;}
+  .kv{display:grid;grid-template-columns:160px 1fr;gap:6px;font-size:12.5px;align-items:center;margin-bottom:5px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CircleDNA Order Conversion Tool</h1>
+  <span class="sub" id="dateLabel">Processing date: —</span>
+</header>
+
+<nav id="tabs">
+  <button data-tab="upload" class="active">1. Upload</button>
+  <button data-tab="review">2. Review <span class="badge" id="issueBadge" style="display:none"></span></button>
+  <button data-tab="resolve">3. Resolve</button>
+  <button data-tab="export">4. Export</button>
+  <button data-tab="history">History</button>
+  <button data-tab="config">Config</button>
+</nav>
+
+<main>
+
+<!-- ========== UPLOAD ========== -->
+<section id="tab-upload">
+  <div class="panel">
+    <h2>Processing date</h2>
+    <div class="hint">Used in output filenames and run history.</div>
+    <input type="text" id="processingDate" placeholder="YYYY-MM-DD" style="max-width:200px;">
+  </div>
+
+  <div class="panel">
+    <h2>Source files</h2>
+    <div class="hint">Upload today's D365 order-lines export and Shopify orders export.</div>
+    <div class="row">
+      <div class="col">
+        <div class="dropzone" id="dz-d365">
+          <input type="file" id="file-d365" accept=".xlsx,.xls">
+          <div>📄 <b>D365 order lines</b> (.xlsx)</div>
+          <div class="fname" id="fname-d365">Click or drop file</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="dropzone" id="dz-shopify">
+          <input type="file" id="file-shopify" accept=".csv">
+          <div>🛒 <b>Shopify orders export</b> (.csv)</div>
+          <div class="fname" id="fname-shopify">Click or drop file</div>
+        </div>
+      </div>
+    </div>
+    <div class="hint" id="uploadStatus" style="margin-top:12px;"></div>
+    <div class="flexend">
+      <button class="btn" id="btnProcess" disabled>Process orders</button>
+    </div>
+  </div>
+</section>
+
+<!-- ========== REVIEW ========== -->
+<section id="tab-review" style="display:none">
+  <div class="panel">
+    <h2>Summary</h2>
+    <div class="stat-grid" id="summaryStats"></div>
+  </div>
+  <div class="panel">
+    <h2>All order lines</h2>
+    <div class="hint">One row per D365 order line, after matching and routing. Kit-level splitting happens at export time.</div>
+    <div class="row" style="margin-bottom:10px;">
+      <input type="text" id="reviewFilter" placeholder="Filter by order #, name, SKU, route, status..." style="max-width:340px;">
+    </div>
+    <div class="tablewrap">
+      <table id="reviewTable"><thead></thead><tbody></tbody></table>
+    </div>
+  </div>
+</section>
+
+<!-- ========== RESOLVE ========== -->
+<section id="tab-resolve" style="display:none">
+  <div class="panel">
+    <h2>Held orders</h2>
+    <div class="hint">Review the reason, then either fix the source data and reprocess, or record a manual correction here (kept separate from the original value).</div>
+    <div id="resolveList"></div>
+  </div>
+</section>
+
+<!-- ========== EXPORT ========== -->
+<section id="tab-export" style="display:none">
+  <div class="panel">
+    <h2>Downloads</h2>
+    <div class="hint">Generating a file does not mark it dispatched — use the confirm button after you've actually handed the file to the warehouse / carrier.</div>
+    <div id="exportList"></div>
+  </div>
+</section>
+
+<!-- ========== HISTORY ========== -->
+<section id="tab-history" style="display:none">
+  <div class="panel">
+    <h2>Run history</h2>
+    <div class="hint">Stored in this browser only. "Dispatched" is set manually after you confirm handoff — regenerating a file never dispatches it automatically.</div>
+    <div class="tablewrap"><table id="historyTable"><thead></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<!-- ========== CONFIG ========== -->
+<section id="tab-config" style="display:none">
+  <div class="panel">
+    <h2>Configuration</h2>
+    <div class="hint">Editable operational rules. Changes are saved to this browser (localStorage). Use Export/Import to share config with teammates.</div>
+    <div class="flexend" style="margin-bottom:12px;">
+      <button class="btn secondary small" id="btnExportCfg">Export config JSON</button>
+      <button class="btn secondary small" id="btnImportCfg">Import config JSON</button>
+      <button class="btn danger small" id="btnResetCfg">Reset to defaults</button>
+    </div>
+    <details class="cfg" open><summary>Country routing</summary><div id="cfgRouting"></div></details>
+    <details class="cfg"><summary>SKU → SF item name mapping</summary><div id="cfgSku"></div></details>
+    <details class="cfg"><summary>Known operational decisions (v1)</summary><div id="cfgDecisions"></div></details>
+  </div>
+</section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ======================================================================
+   CONFIG
+   ====================================================================== */
+const DEFAULT_CONFIG = {
+  // ISO3 (D365) -> ISO2 (Shopify) country code mapping
+  iso3to2: {
+    HKG:"HK",MYS:"MY",USA:"US",IDN:"ID",IND:"IN",JPN:"JP",KOR:"KR",PHL:"PH",
+    ARE:"AE",AUS:"AU",CAN:"CA",CYP:"CY",CZE:"CZ",ESP:"ES",GIB:"GI",ISR:"IL",
+    JOR:"JO",MAR:"MA",NZL:"NZ",OMN:"OM",POL:"PL",QAT:"QA",SAU:"SA",
+    GBR:"GB",SGP:"SG",TWN:"TW",CHN:"CN",MAC:"MO",THA:"TH",VNM:"VN",
+    DEU:"DE",FRA:"FR",NLD:"NL",BEL:"BE",CHE:"CH",AUT:"AT",SWE:"SE",NOR:"NO",
+    DNK:"DK",FIN:"FI",IRL:"IE",ITA:"IT",PRT:"PT",GRC:"GR",TUR:"TR",MEX:"MX",
+    BRA:"BR",ARG:"AR",ZAF:"ZA",EGY:"EG",KWT:"KW",BHR:"BH",LBN:"LB",
+    KHM:"KH",LAO:"LA",MMR:"MM",BRN:"BN",PAK:"PK",BGD:"BD",LKA:"LK",
+    RUS:"RU",UKR:"UA",ROU:"RO",HUN:"HU",BGR:"BG",HRV:"HR",SVK:"SK",
+    SVN:"SI",EST:"EE",LVA:"LV",LTU:"LT",ISL:"IS",LUX:"LU",MLT:"MT"
+  },
+  // route order: hold checks -> manual list -> HK/MY/US -> remaining intl
+  manualFedex: ["ID","IN","JP","KR","PH"],
+  manualDhl: ["AE","AU","CA","CY","CZ","ES","GI","IL","JO","MA","NZ","OM","PL","QA","SA"],
+  suspended: ["KR"], // South Korea: suspended per country reference; overrides manualFedex membership
+  hkSfCountry: "HK",
+  myFedexCountry: "MY",
+  usFedexCountry: "US",
+  skuToSfItemName: {
+    "PRE-FG-000021": "CIRCLE EXOME PREMIUM"
+  },
+  manualFedexNotes: {
+    ID: "Highlight: special template required",
+    KR: "SUSPENDED — do not ship. Country reference marks KR as suspended; hold and flag to Ops.",
+    IN: "Highlight: return LOA and outbound Important Note required",
+    PH: "Highlight: UPS return label/documents required",
+    JP: "Standard manual FedEx handling"
+  },
+  dhlReturnFields: {
+    AE: { purpose: "Sample", desc: "Exempt Human Specimen Not restricted as per IATA DGR section 3.6.2.2.3.8" },
+    AU: { purpose: "Return to Seller", desc: "Plastic tube in paper box" },
+    CA: { purpose: "Return to Seller", desc: "Plastic tube in paper box" },
+    ES: { purpose: "Return to Seller", desc: "Plastic tube in paper box" },
+    GI: { purpose: "Return to Seller", desc: "Plastic tube in paper box" },
+    NZ: { purpose: "Return to Seller", desc: "Plastic tube in paper box" },
+    PL: { purpose: "Return to Seller", desc: "Plastic tube in paper box" },
+    CY: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" },
+    CZ: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" },
+    IL: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" },
+    JO: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" },
+    MA: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" },
+    OM: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" },
+    QA: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" },
+    SA: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" }
+  },
+  sfFixed: {
+    warehouseCode: "852DCB", companyCode: "8526893839", monthlyAccount: "8526893839",
+    sfOrderType: "销售订单", paymentOfCharge: "寄付", carrier: "顺丰速运", carrierProduct: "顺丰特快",
+    receiverProvince: "香港特别行政区", receiverCity: "香港",
+    orderNotes: "All extra charges are billed to monthly account payment",
+    attr01: "N", insured: "N", ifSelfPickup: null, inventoryStatus: null, returnService: "N"
+  }
+};
+
+function loadConfig(){
+  try{
+    const raw = localStorage.getItem("circledna_config");
+    if(raw) return Object.assign({}, DEFAULT_CONFIG, JSON.parse(raw));
+  }catch(e){}
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+function saveConfig(cfg){
+  localStorage.setItem("circledna_config", JSON.stringify(cfg));
+}
+let CONFIG = loadConfig();
+
+/* ======================================================================
+   STATE
+   ====================================================================== */
+let STATE = { d365Rows: null, shopifyOrders: null, records: [], processed: false };
+
+/* ======================================================================
+   CSV PARSER (RFC4180-ish, handles quoted fields incl. embedded newlines/commas)
+   ====================================================================== */
+function parseCSV(text){
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if(c === '"') inQuotes = true;
+      else if(c === ','){ row.push(field); field = ""; }
+      else if(c === '\r'){ /* skip */ }
+      else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ""; }
+      else field += c;
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  if(rows.length && rows[rows.length-1].length===1 && rows[rows.length-1][0]==="") rows.pop();
+  return rows;
+}
+
+function shopifyCsvToOrders(text){
+  const rows = parseCSV(text);
+  const header = rows[0];
+  const idx = name => header.indexOf(name);
+  const col = {
+    name: idx("Name"), email: idx("Email"), finStatus: idx("Financial Status"), paidAt: idx("Paid at"),
+    createdAt: idx("Created at"), lineQty: idx("Lineitem quantity"), lineSku: idx("Lineitem sku"),
+    lineName: idx("Lineitem name"),
+    shipName: idx("Shipping Name"), shipAddr1: idx("Shipping Address1"), shipAddr2: idx("Shipping Address2"),
+    shipCompany: idx("Shipping Company"), shipCity: idx("Shipping City"), shipZip: idx("Shipping Zip"),
+    shipProvince: idx("Shipping Province"), shipCountry: idx("Shipping Country"), shipPhone: idx("Shipping Phone"),
+    cancelledAt: idx("Cancelled at")
+  };
+  const orders = {}; // Name -> order
+  for(let r=1;r<rows.length;r++){
+    const row = rows[r];
+    if(!row || row.length < 2) continue;
+    const name = (row[col.name]||"").trim();
+    if(!name) continue; // continuation rows of a multi-line-item order carry no Name in real Shopify exports; but this export repeats Name per line, so blank means malformed row — skip
+    if(!orders[name]){
+      orders[name] = {
+        name, email: row[col.email]||"", financialStatus: (row[col.finStatus]||"").toLowerCase(),
+        paidAt: row[col.paidAt]||"", createdAt: row[col.createdAt]||"",
+        cancelledAt: row[col.cancelledAt]||"",
+        shipName: row[col.shipName]||"", shipAddr1: row[col.shipAddr1]||"", shipAddr2: row[col.shipAddr2]||"",
+        shipCompany: row[col.shipCompany]||"", shipCity: row[col.shipCity]||"", shipZip: (row[col.shipZip]||"").replace(/^'/,""),
+        shipProvince: row[col.shipProvince]||"", shipCountry: (row[col.shipCountry]||"").trim(), shipPhone: row[col.shipPhone]||"",
+        lines: []
+      };
+    }
+    const o = orders[name];
+    const sku = (row[col.lineSku]||"").trim();
+    const qty = parseInt(row[col.lineQty]||"0",10) || 0;
+    if(sku){
+      const existing = o.lines.find(l=>l.sku===sku);
+      if(existing) existing.qty += qty; // guard against duplicated rows for the same SKU on one order
+      else o.lines.push({ sku, qty, name: row[col.lineName]||"" });
+    }
+    // keep richest financial status seen (paid orders sometimes show a blank continuation row)
+    if(row[col.finStatus]) o.financialStatus = row[col.finStatus].toLowerCase();
+  }
+  return orders; // keyed by order Name e.g. "DNA-15274"
+}
+
+/* ======================================================================
+   D365 WORKBOOK PARSER
+   ====================================================================== */
+function d365WorkbookToRows(workbook){
+  // Accept either a raw D365 export (Sheet1, single sheet) or the merged
+  // "D365 & Shopify" workbook (has a 'D365' sheet) — use whichever sheet
+  // has the D365 column set.
+  const wantCols = ["Shopify reference","Sales order","Item number","Quantity","Country/region","Status"];
+  let sheetName = workbook.SheetNames.find(n => n.toLowerCase() === "d365") || workbook.SheetNames[0];
+  for(const n of workbook.SheetNames){
+    const s = XLSX.utils.sheet_to_json(workbook.Sheets[n], {header:1, defval:""});
+    if(s.length && wantCols.every(c => s[0].includes(c))){ sheetName = n; break; }
+  }
+  const json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {defval:""});
+  return json.map(r => ({
+    shopifyRef: String(r["Shopify reference"]||"").trim(),
+    salesOrder: String(r["Sales order"]||"").trim(),
+    itemNumber: String(r["Item number"]||"").trim(),
+    productName: r["Product name"]||"",
+    quantity: Number(r["Quantity"]||0),
+    country: String(r["Country/region"]||"").trim().toUpperCase(),
+    status: String(r["Status"]||"").trim(),
+    exported: Number(r["Exported"] ?? r["CW deliver remainder"] ?? 0),
+    deliverRemainder: r["Deliver remainder"] !== undefined ? Number(r["Deliver remainder"]) :
+                       (r["CW deliver remainder"] !== undefined ? Number(r["CW deliver remainder"]) : Number(r["Quantity"]||0)),
+    customerName: r["Shopify customer name"] || r["Recipient Contact Name"] || "",
+    customerEmail: r["Shopify customer email"] || r["Recipient Email Address"] || "",
+    customerPhone: r["Shopify customer phone"] || r["Recipient Tel No."] || ""
+  }));
+}
+
+/* ======================================================================
+   ISSUE DETECTION
+   ====================================================================== */
+function detectSaudiShortAddressIssue(fields){
+  // Saudi short address = 4 letters + 4 digits somewhere as its own token, e.g. "RRRD2929"
+  const re = /\b[A-Za-z]{4}\d{4}\b/;
+  const found = fields.some(f => re.test(f||""));
+  return { ok: found, reason: found ? null : "Missing/malformed Saudi Short Address code (expected 4 letters + 4 digits)" };
+}
+function detectNonAsciiIssue(fields){
+  // Flag ANY character outside basic ASCII (per confirmed rule: flag both Chinese and accented Latin)
+  const re = /[^\x00-\x7F]/;
+  const hit = fields.find(f => f && re.test(f));
+  return hit ? { ok:false, reason: `Non-ASCII character in address/name field: "${hit}"` } : { ok:true };
+}
+function detectIncompleteAddress(addr1, addr2, city){
+  const combined = `${addr1||""} ${addr2||""}`.trim();
+  if(combined.length < 5) return { ok:false, reason:"Address line is missing or too short" };
+  if(/^\d+$/.test(combined.replace(/\s/g,""))) return { ok:false, reason:"Address is numeric-only" };
+  if(!city || !city.trim()) return { ok:false, reason:"City is missing" };
+  return { ok:true };
+}
+
+/* ======================================================================
+   COUNTRY ROUTING
+   ====================================================================== */
+function routeForCountry(iso2, cfg){
+  if(!iso2) return { route:"HOLD", reason:"Missing/unresolvable country code" };
+  if(cfg.suspended.includes(iso2)) return { route:"HOLD", reason:`${iso2} shipping suspended per country reference` };
+  if(iso2 === cfg.hkSfCountry) return { route:"HK-SF" };
+  if(cfg.manualFedex.includes(iso2)) return { route:"MANUAL-FEDEX" };
+  if(cfg.manualDhl.includes(iso2)) return { route:"MANUAL-DHL" };
+  if(iso2 === cfg.myFedexCountry) return { route:"MY-FEDEX" };
+  if(iso2 === cfg.usFedexCountry) return { route:"US-FEDEX" };
+  return { route:"INTL-FEDEX" };
+}
+
+/* ======================================================================
+   FEDEX SPLIT ALLOCATION (max 4 kits/shipment, avoid 1-kit remainder)
+   ====================================================================== */
+function splitFedexQty(qty){
+  if(qty <= 4) return [qty];
+  const shipments = [];
+  let remaining = qty;
+  while(remaining > 4){
+    if(remaining - 4 === 1){ shipments.push(3); remaining -= 3; }
+    else { shipments.push(4); remaining -= 4; }
+  }
+  if(remaining > 0) shipments.push(remaining);
+  return shipments;
+}
+function shipmentRef(baseRef, idx){
+  return idx === 0 ? baseRef : `${baseRef}_${idx}`;
+}
+
+/* ======================================================================
+   PHONE / ERP HELPERS (HK–SF)
+   ====================================================================== */
+function stripHkPrefix(phone){
+  let p = String(phone||"").replace(/[^\d+]/g,"");
+  if(p.startsWith("+852")) p = p.slice(4);
+  else if(p.startsWith("00852")) p = p.slice(5);
+  else if(p.startsWith("852") && p.length > 8) p = p.slice(3);
+  return p;
+}
+function sfAddress(o){
+  return [o.shipAddr2, o.shipAddr1, o.shipCity].map(v=>(v||"").trim()).filter(Boolean).join(", ");
+}
+
+/* ======================================================================
+   MATCH + BUILD RECORDS
+   ====================================================================== */
+function buildRecords(d365Rows, shopifyOrders, cfg){
+  const records = [];
+  for(const d of d365Rows){
+    const rec = { d365: d, shopify: null, issues: [], route: null, status: "PENDING" };
+    const so = shopifyOrders[d.shopifyRef];
+    rec.shopify = so || null;
+
+    // --- Eligibility: Status Open order + Exported=0 + Deliver remainder>0; qty = Deliver remainder
+    const eligible = /open order/i.test(d.status) && Number(d.exported) === 0 && Number(d.deliverRemainder) > 0;
+    rec.kitQty = Number(d.deliverRemainder) > 0 ? Number(d.deliverRemainder) : Number(d.quantity);
+    if(!eligible){
+      rec.status = "HOLD";
+      rec.issues.push(`D365 not eligible (status="${d.status}", exported=${d.exported}, deliverRemainder=${d.deliverRemainder})`);
+    }
+
+    // --- Older order: no matching Shopify data in this upload
+    if(!so){
+      rec.status = "HOLD";
+      rec.issues.push("No matching Shopify data in this upload — re-upload a Shopify export covering this order's date, or verify payment manually");
+    } else {
+      // --- Payment check
+      const fs = so.financialStatus;
+      if(fs === "paid"){
+        // continue
+      } else if(fs === "pending" || fs === "expired"){
+        rec.status = "HOLD";
+        rec.issues.push(`Shopify payment status is "${fs}" — excluded from dispatch, flagged for D365 action list`);
+      } else if(fs === "refunded" || fs === "partially_refunded" || fs === "voided"){
+        rec.status = "HOLD";
+        rec.issues.push(`Shopify payment status "${fs}" needs an explicit handling rule — held for review`);
+      } else if(fs){
+        rec.status = "HOLD";
+        rec.issues.push(`Unrecognized Shopify payment status "${fs}" — held for review`);
+      }
+      if(so.cancelledAt){
+        rec.status = "HOLD";
+        rec.issues.push("Shopify order is cancelled");
+      }
+    }
+
+    // --- Country resolution + conflict check
+    const d365Iso2 = cfg.iso3to2[d.country] || (d.country && d.country.length===2 ? d.country : null);
+    const shopifyIso2 = so ? so.shipCountry.toUpperCase() : null;
+    const finalCountry = shopifyIso2 || d365Iso2 || null;
+    if(d365Iso2 && shopifyIso2 && d365Iso2 !== shopifyIso2){
+      rec.status = "HOLD";
+      rec.issues.push(`Country conflict: D365=${d.country} (${d365Iso2}) vs Shopify=${shopifyIso2}`);
+    }
+    rec.country = finalCountry;
+
+    const routing = routeForCountry(finalCountry, cfg);
+    rec.route = routing.route;
+    if(routing.reason) rec.issues.push(routing.reason);
+    if(routing.route === "HOLD" && rec.status !== "HOLD"){
+      rec.status = "HOLD";
+    }
+
+    // --- Address / language checks (only when we have shopify shipping data)
+    if(so){
+      const fields = [so.shipName, so.shipAddr1, so.shipAddr2, so.shipCity, so.shipProvince];
+      const nonAscii = detectNonAsciiIssue(fields);
+      if(!nonAscii.ok){ rec.status = "HOLD"; rec.issues.push(nonAscii.reason); }
+      const incomplete = detectIncompleteAddress(so.shipAddr1, so.shipAddr2, so.shipCity);
+      if(!incomplete.ok){ rec.status = "HOLD"; rec.issues.push(incomplete.reason); }
+      if(finalCountry === "SA"){
+        const saudi = detectSaudiShortAddressIssue(fields);
+        if(!saudi.ok){ rec.status = "HOLD"; rec.issues.push(saudi.reason); }
+      }
+    }
+
+    if(rec.status !== "HOLD") rec.status = "READY";
+    records.push(rec);
+  }
+  return records;
+}
+
+/* ======================================================================
+   EXPORT BUILDERS
+   ====================================================================== */
+function download(filename, blob){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+function writeWorkbook(sheets, filename){
+  const wb = XLSX.utils.book_new();
+  for(const [name, aoa] of sheets){
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  }
+  const wbout = XLSX.write(wb, {bookType:"xlsx", type:"array"});
+  download(filename, new Blob([wbout], {type:"application/octet-stream"}));
+}
+
+function expandKitRows(rec){
+  // one row per kit; returns [{lineIndex, sku, sfItemName}]
+  const sku = rec.d365.itemNumber;
+  const rows = [];
+  for(let i=0;i<rec.kitQty;i++) rows.push({ sku });
+  return rows;
+}
+
+const SF_HEADER = ["warehouseCode","companyCode","monthlyAccount","erpOrderLineNum","sfOrderType","paymentOfCharge",
+  "erpOrder","carrier","carrierProduct","receiverCompany","receiverProvince","receiverCity","receiverArea","receiverAddress",
+  null,"Attr01","amountofpaymentReceived","insured","ParcelDeclaredValue","skuNo","itemName","itemQuantity","itemPrice",
+  "orderTotalAmount","receiverName","receiverPhone","receiverMobile","orderNotes","ifSelfPickup","inventoryStatus",
+  "","","","","","ReturnService","currency"];
+
+function buildSfExport(records, cfg){
+  const rows = [SF_HEADER];
+  let lineNum = 0;
+  for(const rec of records.filter(r=>r.status==="READY" && r.route==="HK-SF")){
+    const so = rec.shopify;
+    const addr = sfAddress(so);
+    const phone = stripHkPrefix(so.shipPhone);
+    for(const kit of expandKitRows(rec)){
+      lineNum++;
+      const itemName = cfg.skuToSfItemName[kit.sku] || kit.sku;
+      rows.push([
+        cfg.sfFixed.warehouseCode, cfg.sfFixed.companyCode, cfg.sfFixed.monthlyAccount, String(lineNum),
+        cfg.sfFixed.sfOrderType, cfg.sfFixed.paymentOfCharge, `${rec.d365.shopifyRef}-re`,
+        cfg.sfFixed.carrier, cfg.sfFixed.carrierProduct, "", cfg.sfFixed.receiverProvince, cfg.sfFixed.receiverCity,
+        "", addr, "", cfg.sfFixed.attr01, "", cfg.sfFixed.insured, "", itemName, itemName, 1, "", "",
+        so.shipName, phone, phone, cfg.sfFixed.orderNotes, "", "", "", "", "", "", "", cfg.sfFixed.returnService, ""
+      ]);
+    }
+  }
+  return rows;
+}
+
+const JOB_ORDER_HEADER = ["Shopify reference","Sales order","Item number","Product name","Quantity","Country/region",
+  "Status","Created date and time","Shipping Method","Recipient Contact Name","Recipient Address Line 1",
+  "Recipient Address Line 2","Recipient City","Recipient Country Code","Recipient Zip Code","Recipient Tel No.",
+  "Recipient Email Address","Notes","TAX ID"];
+
+function buildJobOrderExport(records){
+  const rows = [JOB_ORDER_HEADER];
+  for(const rec of records.filter(r=>r.status==="READY")){
+    const so = rec.shopify, d = rec.d365;
+    rows.push([
+      d.shopifyRef, d.salesOrder, d.itemNumber, d.productName, rec.kitQty, d.country, d.status, d.createdAt||"",
+      "Free Shipping", so ? so.shipName : "", so ? so.shipAddr1 : "", so ? so.shipAddr2 : "", so ? so.shipCity : "",
+      rec.country||"", so ? so.shipZip : "", so ? so.shipPhone : "", so ? so.email : "", "", ""
+    ]);
+  }
+  return rows;
+}
+
+function buildIssuesExport(records){
+  const detail = [["Shopify reference","Sales order","Route","Reasons","Recipient Name","Country","Resolution status","Operator notes"]];
+  const paymentExceptions = [["Name","Email","Financial Status","Total","Shipping Name","Shipping Country"]];
+  for(const rec of records.filter(r=>r.status==="HOLD")){
+    const so = rec.shopify, d = rec.d365;
+    detail.push([d.shopifyRef, d.salesOrder, rec.route||"", rec.issues.join(" | "),
+      so?so.shipName:"", rec.country||"", "Open", ""]);
+    if(so && (so.financialStatus === "pending" || so.financialStatus === "expired")){
+      paymentExceptions.push([so.name, so.email, so.financialStatus, "", so.shipName, so.shipCountry]);
+    }
+  }
+  return [["Issue detail", detail], ["Payment exceptions", paymentExceptions]];
+}
+
+function buildD365ActionList(records){
+  const rows = [["Sales order","Shopify reference","Reason","Recommended action"]];
+  for(const rec of records.filter(r=>r.status==="HOLD")){
+    const so = rec.shopify;
+    if(so && (so.financialStatus === "pending" || so.financialStatus === "expired" || so.cancelledAt)){
+      rows.push([rec.d365.salesOrder, rec.d365.shopifyRef, rec.issues.join(" | "), "Remove from active D365 fulfillment queue (manual — no auto-write in v1)"]);
+    }
+  }
+  return rows;
+}
+
+// Generic (non-official-template) export for FedEx-bound routes, pending the
+// actual MY/US/Intl/Manual template password.
+const GENERIC_FEDEX_HEADER = ["Route","Shipment reference","Original order","SKU","Kit qty in shipment",
+  "Recipient Name","Address 1","Address 2","City","Country","Zip","Phone","Email","Notes"];
+function buildGenericFedexExport(records, route){
+  const rows = [GENERIC_FEDEX_HEADER];
+  for(const rec of records.filter(r=>r.status==="READY" && r.route===route)){
+    const so = rec.shopify, d = rec.d365;
+    const shipments = splitFedexQty(rec.kitQty);
+    shipments.forEach((qty, idx)=>{
+      const note = cfgNote(route, rec.country);
+      rows.push([route, shipmentRef(d.shopifyRef, idx), d.shopifyRef, d.itemNumber, qty,
+        so?so.shipName:"", so?so.shipAddr1:"", so?so.shipAddr2:"", so?so.shipCity:"", rec.country, so?so.shipZip:"",
+        so?so.shipPhone:"", so?so.email:"", note]);
+    });
+  }
+  return rows;
+}
+function cfgNote(route, country){
+  if(route==="MANUAL-FEDEX") return CONFIG.manualFedexNotes[country] || "";
+  if(route==="MANUAL-DHL"){
+    const f = CONFIG.dhlReturnFields[country];
+    return f ? `Return purpose: ${f.purpose}; Return description: ${f.desc}` : "";
+  }
+  return "";
+}
+
+/* ======================================================================
+   HISTORY (localStorage)
+   ====================================================================== */
+function getHistory(){
+  try{ return JSON.parse(localStorage.getItem("circledna_history")||"[]"); }catch(e){ return []; }
+}
+function saveHistory(h){ localStorage.setItem("circledna_history", JSON.stringify(h)); }
+function recordGenerated(date, fileKey){
+  const h = getHistory();
+  let run = h.find(r=>r.date===date);
+  if(!run){ run = {date, files:{}, dispatched:{}}; h.push(run); }
+  run.files[fileKey] = (run.files[fileKey]||0) + 1;
+  saveHistory(h);
+  renderHistory();
+}
+function markDispatched(date, fileKey){
+  const h = getHistory();
+  let run = h.find(r=>r.date===date);
+  if(!run){ run = {date, files:{}, dispatched:{}}; h.push(run); }
+  run.dispatched[fileKey] = new Date().toISOString();
+  saveHistory(h);
+  renderHistory();
+  toast(`Marked ${fileKey} as dispatched for ${date}`);
+}
+
+/* ======================================================================
+   UI
+   ====================================================================== */
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 2200);
+}
+
+document.querySelectorAll("#tabs button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    document.querySelectorAll("#tabs button").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    document.querySelectorAll("main > section").forEach(s=>s.style.display="none");
+    document.getElementById("tab-"+btn.dataset.tab).style.display="block";
+    if(btn.dataset.tab==="history") renderHistory();
+    if(btn.dataset.tab==="config") renderConfig();
+  });
+});
+
+let uploaded = { d365: null, shopify: null };
+function wireDropzone(zoneId, fileId, onLoad){
+  const zone = document.getElementById(zoneId), input = document.getElementById(fileId);
+  zone.addEventListener("click", ()=>input.click());
+  zone.addEventListener("dragover", e=>{e.preventDefault(); zone.style.borderColor="var(--accent)";});
+  zone.addEventListener("drop", e=>{
+    e.preventDefault();
+    if(e.dataTransfer.files.length) { input.files = e.dataTransfer.files; onLoad(e.dataTransfer.files[0]); }
+  });
+  input.addEventListener("change", ()=>{ if(input.files.length) onLoad(input.files[0]); });
+}
+function markFilled(zoneId, fnameId, file){
+  document.getElementById(zoneId).classList.add("filled");
+  document.getElementById(fnameId).textContent = file.name;
+}
+function checkReady(){
+  document.getElementById("btnProcess").disabled = !(uploaded.d365 && uploaded.shopify);
+}
+
+wireDropzone("dz-d365","file-d365", file=>{
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const wb = XLSX.read(e.target.result, {type:"array", cellDates:true});
+      uploaded.d365 = d365WorkbookToRows(wb);
+      markFilled("dz-d365","fname-d365",file);
+      document.getElementById("uploadStatus").textContent = `D365: ${uploaded.d365.length} order lines loaded.`;
+      checkReady();
+    }catch(err){ toast("Failed to parse D365 file: "+err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+});
+wireDropzone("dz-shopify","file-shopify", file=>{
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      uploaded.shopify = shopifyCsvToOrders(e.target.result);
+      markFilled("dz-shopify","fname-shopify",file);
+      const n = Object.keys(uploaded.shopify).length;
+      document.getElementById("uploadStatus").textContent =
+        (uploaded.d365?`D365: ${uploaded.d365.length} order lines loaded. `:"") + `Shopify: ${n} orders loaded.`;
+      checkReady();
+    }catch(err){ toast("Failed to parse Shopify CSV: "+err.message); }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("btnProcess").addEventListener("click", ()=>{
+  const date = document.getElementById("processingDate").value.trim();
+  if(!date){ toast("Enter a processing date first"); return; }
+  document.getElementById("dateLabel").textContent = "Processing date: "+date;
+  STATE.records = buildRecords(uploaded.d365, uploaded.shopify, CONFIG);
+  STATE.processed = true;
+  renderSummary(); renderReviewTable(); renderResolve(); renderExport();
+  document.querySelector('#tabs button[data-tab="review"]').click();
+});
+
+function renderSummary(){
+  const recs = STATE.records;
+  const ready = recs.filter(r=>r.status==="READY");
+  const hold = recs.filter(r=>r.status==="HOLD");
+  const byRoute = {};
+  ready.forEach(r=>{ byRoute[r.route] = (byRoute[r.route]||0) + r.kitQty; });
+  const stats = [
+    ["D365 lines received", recs.length],
+    ["Ready to dispatch", ready.length],
+    ["Held / issues", hold.length],
+    ["Kits — HK-SF", byRoute["HK-SF"]||0],
+    ["Kits — MY-FedEx", byRoute["MY-FEDEX"]||0],
+    ["Kits — US-FedEx", byRoute["US-FEDEX"]||0],
+    ["Kits — Intl-FedEx", byRoute["INTL-FEDEX"]||0],
+    ["Kits — Manual-FedEx", byRoute["MANUAL-FEDEX"]||0],
+    ["Kits — Manual-DHL", byRoute["MANUAL-DHL"]||0],
+  ];
+  document.getElementById("summaryStats").innerHTML = stats.map(([l,n])=>
+    `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+  const badge = document.getElementById("issueBadge");
+  if(hold.length){ badge.style.display="inline-block"; badge.textContent = hold.length; }
+  else badge.style.display="none";
+}
+
+function renderReviewTable(){
+  const head = ["Order","Sales order","SKU","Qty","Country","Route","Status","Issues"];
+  const thead = document.querySelector("#reviewTable thead");
+  thead.innerHTML = "<tr>"+head.map(h=>`<th>${h}</th>`).join("")+"</tr>";
+  function draw(filterText){
+    const tbody = document.querySelector("#reviewTable tbody");
+    const f = (filterText||"").toLowerCase();
+    const rows = STATE.records.filter(r=>{
+      if(!f) return true;
+      return [r.d365.shopifyRef, r.d365.salesOrder, r.d365.itemNumber, r.route, r.status].join(" ").toLowerCase().includes(f);
+    });
+    tbody.innerHTML = rows.map(r=>{
+      const pillClass = r.status==="READY" ? "ready" : "hold";
+      return `<tr>
+        <td>${r.d365.shopifyRef}</td><td>${r.d365.salesOrder}</td><td>${r.d365.itemNumber}</td>
+        <td>${r.kitQty}</td><td>${r.country||"—"}</td><td>${r.route||"—"}</td>
+        <td><span class="pill ${pillClass}">${r.status}</span></td>
+        <td>${r.issues.map(i=>`<span class="tag">${i}</span>`).join("")}</td>
+      </tr>`;
+    }).join("");
+  }
+  draw("");
+  document.getElementById("reviewFilter").oninput = e=>draw(e.target.value);
+}
+
+function renderResolve(){
+  const held = STATE.records.filter(r=>r.status==="HOLD");
+  const el = document.getElementById("resolveList");
+  if(!held.length){ el.innerHTML = `<div class="hint">No held orders.</div>`; return; }
+  el.innerHTML = held.map((r,i)=>`
+    <div class="panel" style="margin-bottom:10px;">
+      <div class="kv"><span class="muted">Order</span><b>${r.d365.shopifyRef}</b></div>
+      <div class="kv"><span class="muted">Sales order</span>${r.d365.salesOrder}</div>
+      <ul class="issue-list">${r.issues.map(i=>`<li>⚠ ${i}</li>`).join("")}</ul>
+      <textarea rows="2" placeholder="Operator note / correction (does not overwrite source data)" id="note-${i}"></textarea>
+    </div>`).join("");
+}
+
+function renderExport(){
+  const date = document.getElementById("processingDate").value.trim() || "unknown-date";
+  const items = [
+    { key:"sf", label:`HK–SF: ${date} orders for SF.xlsx`, build:()=>[["test", buildSfExport(STATE.records, CONFIG)]] },
+    { key:"joborders", label:`Job orders 2026: Job orders ${date}.xlsx`, build:()=>[["D365", buildJobOrderExport(STATE.records)]] },
+    { key:"issues", label:`Issues: Issue orders ${date}.xlsx`, build:()=>buildIssuesExport(STATE.records) },
+    { key:"d365action", label:`D365 action list: D365 action list ${date}.xlsx`, build:()=>[["Action list", buildD365ActionList(STATE.records)]] },
+    { key:"myfedex", label:`MY–FedEx: MY Circle Exome Orders ${date}.xlsx (generic — pending official template)`, build:()=>[["Generic", buildGenericFedexExport(STATE.records,"MY-FEDEX")]] },
+    { key:"usfedex", label:`US–FedEx: US Circle Exome Orders ${date}.xlsx (generic — pending official template)`, build:()=>[["Generic", buildGenericFedexExport(STATE.records,"US-FEDEX")]] },
+    { key:"intlfedex", label:`Intl–FedEx: Intl Circle Exome Orders ${date}.xlsx (generic — pending official template)`, build:()=>[["Generic", buildGenericFedexExport(STATE.records,"INTL-FEDEX")]] },
+    { key:"manualfedex", label:`Manual fulfillment — FedEx tab (generic — pending official template)`, build:()=>[["FedEx", buildGenericFedexExport(STATE.records,"MANUAL-FEDEX")]] },
+    { key:"manualdhl", label:`Manual fulfillment — DHL tab (generic — pending official template)`, build:()=>[["DHL", buildGenericFedexExport(STATE.records,"MANUAL-DHL")]] },
+  ];
+  document.getElementById("exportList").innerHTML = items.map(it=>`
+    <div class="row" style="align-items:center;border-bottom:1px solid var(--border);padding:9px 0;">
+      <div class="col" style="flex:3;">${it.label}</div>
+      <div class="col" style="flex:0 0 auto;display:flex;gap:6px;">
+        <button class="btn small" data-download="${it.key}">Download</button>
+        <button class="btn secondary small" data-dispatch="${it.key}">Mark dispatched</button>
+      </div>
+    </div>`).join("");
+  items.forEach(it=>{
+    document.querySelector(`[data-download="${it.key}"]`).onclick = ()=>{
+      const sheets = it.build();
+      writeWorkbook(sheets, it.label.split(":")[1]?.trim().split(" (")[0] || `${it.key}-${date}.xlsx`);
+      recordGenerated(date, it.key);
+    };
+    document.querySelector(`[data-dispatch="${it.key}"]`).onclick = ()=> markDispatched(date, it.key);
+  });
+}
+
+function renderHistory(){
+  const h = getHistory().slice().reverse();
+  const thead = document.querySelector("#historyTable thead");
+  thead.innerHTML = "<tr><th>Date</th><th>Files generated</th><th>Dispatched</th></tr>";
+  document.querySelector("#historyTable tbody").innerHTML = h.map(r=>`
+    <tr>
+      <td>${r.date}</td>
+      <td>${Object.entries(r.files||{}).map(([k,n])=>`<span class="tag">${k} ×${n}</span>`).join("")}</td>
+      <td>${Object.entries(r.dispatched||{}).map(([k,t])=>`<span class="tag">${k}: ${new Date(t).toLocaleString()}</span>`).join("") || "—"}</td>
+    </tr>`).join("") || `<tr><td colspan="3" class="muted">No runs yet.</td></tr>`;
+}
+
+function renderConfig(){
+  const routingEl = document.getElementById("cfgRouting");
+  routingEl.innerHTML = `
+    <div class="kv"><span class="muted">HK → SF</span><code>${CONFIG.hkSfCountry}</code></div>
+    <div class="kv"><span class="muted">MY → FedEx</span><code>${CONFIG.myFedexCountry}</code></div>
+    <div class="kv"><span class="muted">US → FedEx</span><code>${CONFIG.usFedexCountry}</code></div>
+    <div class="kv"><span class="muted">Manual-FedEx</span>${CONFIG.manualFedex.map(c=>`<span class="tag">${c}</span>`).join("")}</div>
+    <div class="kv"><span class="muted">Manual-DHL</span>${CONFIG.manualDhl.map(c=>`<span class="tag">${c}</span>`).join("")}</div>
+    <div class="kv"><span class="muted">Suspended</span>${CONFIG.suspended.map(c=>`<span class="tag" style="background:var(--bad-bg);color:var(--bad)">${c}</span>`).join("")}</div>
+    <div class="hint">All other valid countries route to Intl-FedEx. Edit via Export/Import JSON for now.</div>`;
+  document.getElementById("cfgSku").innerHTML = Object.entries(CONFIG.skuToSfItemName).map(([sku,name])=>
+    `<div class="kv"><code>${sku}</code>→ ${name}</div>`).join("");
+  document.getElementById("cfgDecisions").innerHTML = `
+    <ul class="issue-list">
+      <li>D365 eligibility = Status "Open order" + Exported=0 + Deliver remainder&gt;0; kit qty = Deliver remainder</li>
+      <li>Orders missing from the day's Shopify export are held — re-upload a wider-range export to release</li>
+      <li>South Korea is currently held as suspended (overrides the Manual-FedEx list)</li>
+      <li>Any non-ASCII character (Chinese or accented Latin) in name/address fields is flagged for review</li>
+      <li>FedEx split: fill to 4 kits/shipment, rebalance the last two shipments to avoid a 1-kit remainder</li>
+      <li>D365 "move out of queue" = action list only in v1, no automatic D365 writes</li>
+    </ul>`;
+}
+
+document.getElementById("btnExportCfg").addEventListener("click", ()=>{
+  download("circledna-config.json", new Blob([JSON.stringify(CONFIG,null,2)], {type:"application/json"}));
+});
+document.getElementById("btnImportCfg").addEventListener("click", ()=>{
+  const input = document.createElement("input");
+  input.type = "file"; input.accept = ".json";
+  input.onchange = ()=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      try{ CONFIG = Object.assign({}, DEFAULT_CONFIG, JSON.parse(e.target.result)); saveConfig(CONFIG); renderConfig(); toast("Config imported"); }
+      catch(err){ toast("Invalid config JSON"); }
+    };
+    reader.readAsText(input.files[0]);
+  };
+  input.click();
+});
+document.getElementById("btnResetCfg").addEventListener("click", ()=>{
+  CONFIG = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  saveConfig(CONFIG); renderConfig(); toast("Config reset to defaults");
+});
+
+// default processing date = today
+document.getElementById("processingDate").value = new Date().toISOString().slice(0,10);
+renderHistory();
+</script>
+</body>
+</html>
