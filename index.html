@@ -694,7 +694,48 @@ const FEDEX_HEADER_INTL = ["Transaction ID","Sender Code","Service Type","Packag
   "Recipient Delivery Alert Flag"];
 const FEDEX_HEADER_MY = FEDEX_HEADER_INTL.map(h => h==="Print of Commerical Invoice" ? "Print of Commercial Invoice" : h);
 const FEDEX_HEADER_US = [...FEDEX_HEADER_MY, "MID"];
-const FEDEX_HEADER_MANUAL = [...FEDEX_HEADER_MY, "Special handling note"];
+// The "manual fulfillment" reference file (Other 2026-09-11.xlsx) uses the
+// same 38 fields as the MY/Intl template, plus 2 unlabeled columns and a
+// Barcode column (41 total) — confirmed against the real file, including
+// the phone format difference (no country calling code, just the leading 0
+// stripped) and Recipient Zip Code left blank rather than the automated
+// templates' full E.164-ish phone. We add 3 more columns on the end so one
+// shared layout covers both the FedEx and DHL tabs.
+const MANUAL_BASE_HEADER = [...FEDEX_HEADER_MY, null, null, "Barcode"];
+const MANUAL_HEADER = [...MANUAL_BASE_HEADER, "Required handling", "Return purpose", "Return description"];
+function normalizePhoneForManual(rawPhone){
+  let p = String(rawPhone||"").replace(/[^\d]/g,"");
+  if(p.startsWith("0")) p = p.slice(1);
+  return p;
+}
+function buildManualRows(records, route){
+  const rc = CONFIG.fedexRouteConfig[route] || CONFIG.fedexRouteConfig["INTL-FEDEX"];
+  const rows = [MANUAL_HEADER];
+  // Plan explicitly excludes DHL from the FedEx 4-kit shipment split — every
+  // kit of a DHL order shares one shipment reference regardless of count.
+  const splitFn = route === "MANUAL-DHL" ? (qty)=>[qty] : splitFedexQty;
+  for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route===route)){
+    const so = rec.shopify, d = rec.d365;
+    const shipments = splitFn(rec.kitQty);
+    const handlingNote = route==="MANUAL-FEDEX" ? (CONFIG.manualFedexNotes[rec.country]||"") : "";
+    const dhl = route==="MANUAL-DHL" ? (CONFIG.dhlReturnFields[rec.country]||{purpose:"",desc:""}) : {purpose:"",desc:""};
+    shipments.forEach((qty, sIdx)=>{
+      const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
+      for(let k=0;k<qty;k++){
+        rows.push([
+          txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "Circle Exome Premium",
+          so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country||"",
+          textSafe(so?so.shipZip:""), normalizePhoneForManual(so?so.shipPhone:""), so?so.email:"",
+          rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
+          rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y",
+          "", "", "",
+          handlingNote, dhl.purpose, dhl.desc
+        ]);
+      }
+    });
+  }
+  return rows;
+}
 
 function fedexRows(records, route, header, includeMid, includeNote){
   const rc = CONFIG.fedexRouteConfig[route];
@@ -723,28 +764,8 @@ function fedexRows(records, route, header, includeMid, includeNote){
 function buildIntlFedexExport(records){ return fedexRows(records, "INTL-FEDEX", FEDEX_HEADER_INTL, false, false); }
 function buildMyFedexExport(records){ return fedexRows(records, "MY-FEDEX", FEDEX_HEADER_MY, false, false); }
 function buildUsFedexExport(records){ return fedexRows(records, "US-FEDEX", FEDEX_HEADER_US, true, false); }
-function buildManualFedexExport(records){ return fedexRows(records, "MANUAL-FEDEX", FEDEX_HEADER_MANUAL, false, true); }
-
-const MANUAL_DHL_HEADER = ["Shipment reference","Original order","SKU","Kit qty","Recipient Name","Address 1",
-  "Address 2","City","Country","Zip","Phone","Email","Return purpose","Return description"];
-function buildManualDhlExport(records){
-  const rows = [MANUAL_DHL_HEADER];
-  for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route==="MANUAL-DHL")){
-    const so = rec.shopify, d = rec.d365;
-    const f = CONFIG.dhlReturnFields[rec.country] || {purpose:"",desc:""};
-    const shipments = splitFedexQty(rec.kitQty); // DHL isn't confirmed to need the 4-kit split, but no rule says otherwise either
-    shipments.forEach((qty, idx)=>{
-      rows.push([shipmentRef(d.shopifyRef, idx), d.shopifyRef, d.itemNumber, qty,
-        so?so.shipName:"", so?so.shipAddr1:"", so?so.shipAddr2:"", so?so.shipCity:"", rec.country,
-        textSafe(so?so.shipZip:""), textSafe(so?so.shipPhone:""), so?so.email:"", f.purpose, f.desc]);
-    });
-  }
-  return rows;
-}
-function cfgNote(route, country){
-  if(route==="MANUAL-FEDEX") return CONFIG.manualFedexNotes[country] || "";
-  return "";
-}
+function buildManualFedexExport(records){ return buildManualRows(records, "MANUAL-FEDEX"); }
+function buildManualDhlExport(records){ return buildManualRows(records, "MANUAL-DHL"); }
 
 /* ======================================================================
    HISTORY (localStorage)
@@ -964,7 +985,7 @@ function renderExport(){
     { key:"myfedex", label:`MY–FedEx: MY Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildMyFedexExport(STATE.records)]] },
     { key:"usfedex", label:`US–FedEx: US Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildUsFedexExport(STATE.records)]] },
     { key:"intlfedex", label:`Intl–FedEx: Intl Circle Exome Orders ${date}.xlsx`, build:()=>[["Sheet1", buildIntlFedexExport(STATE.records)]] },
-    { key:"manual", label:`Manual fulfillment: Manual fulfillment orders ${date}.xlsx (FedEx + DHL tabs; DHL layout not yet confirmed against an official template)`,
+    { key:"manual", label:`Manual fulfillment: Manual fulfillment orders ${date}.xlsx (FedEx + DHL tabs)`,
       build:()=>[["FedEx", buildManualFedexExport(STATE.records)], ["DHL", buildManualDhlExport(STATE.records)]] },
   ];
   document.getElementById("exportList").innerHTML = items.map(it=>`
@@ -1018,8 +1039,9 @@ function renderConfig(){
       <li>Held orders can be manually released (Resolve tab) to include them in dispatch anyway — recorded with a note, kept separate from the original held status</li>
       <li>Job order Tax ID: extracted from a Shopify Note Attributes line whose key contains "tax" — no dedicated Shopify export column exists for this, confirm the real attribute name if it's not being picked up</li>
       <li>Job order phone/zip: prefixed with ' when they start with 0, so pasting into Google Sheets doesn't drop the leading zero</li>
-      <li>MY/US/Intl-FedEx exports now use the real decrypted templates (field-for-field, one row per kit); Manual-FedEx reuses the Intl template as a default since no reference template was supplied for it</li>
-      <li>Manual fulfillment is one workbook with FedEx and DHL tabs; the DHL tab layout is still a generic best-effort, not confirmed against an official template</li>
+      <li>MY/US/Intl-FedEx exports now use the real decrypted templates (field-for-field, one row per kit)</li>
+      <li>Manual fulfillment is one workbook with FedEx and DHL tabs, both using the confirmed manual-fulfillment layout (41 base columns + Required handling / Return purpose / Return description) — phone here has no country calling code, unlike the automated MY/US/Intl templates</li>
+      <li>DHL orders don't get the FedEx 4-kit shipment split — every kit of a DHL order shares one shipment reference</li>
       <li>FedEx split: fill to 4 kits/shipment, rebalance the last two shipments to avoid a 1-kit remainder</li>
       <li>D365 "move out of queue" = action list only in v1, no automatic D365 writes</li>
     </ul>`;
