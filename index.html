@@ -661,8 +661,8 @@ function buildIssuesExport(records){
     const so = rec.shopify, d = rec.d365;
     detail.push([d.shopifyRef, d.salesOrder, rec.route||"", rec.issues.join(" | "),
       so?so.shipName:"", rec.country||"", "Open", rec.override.note||""]);
-    if(so && (so.financialStatus === "pending" || so.financialStatus === "expired")){
-      paymentExceptions.push([so.name, so.email, so.financialStatus, "", so.shipName, so.shipCountry]);
+    if(so && (so.financialStatus === "pending" || so.financialStatus === "expired" || so.cancelledAt)){
+      paymentExceptions.push([so.name, so.email, so.cancelledAt ? "cancelled" : so.financialStatus, "", so.shipName, so.shipCountry]);
     }
   }
   return [["Issue detail", detail], ["Payment exceptions", paymentExceptions]];
