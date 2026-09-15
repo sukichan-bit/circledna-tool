@@ -130,6 +130,10 @@
     <div class="tablewrap">
       <table id="reviewTable"><thead></thead><tbody></tbody></table>
     </div>
+    <div class="flexend" style="margin-top:14px;">
+      <button class="btn secondary" data-nav="upload">← Back: Upload</button>
+      <button class="btn" data-nav="resolve">Next: Resolve →</button>
+    </div>
   </div>
 </section>
 
@@ -137,8 +141,12 @@
 <section id="tab-resolve" style="display:none">
   <div class="panel">
     <h2>Held orders</h2>
-    <div class="hint">Review the reason, then either fix the source data and reprocess, or record a manual correction here (kept separate from the original value).</div>
+    <div class="hint">Review the reason, then either fix the source data and reprocess, or release the order to include it in dispatch (kept separate from the original value — the original issue is still recorded, just marked resolved).</div>
     <div id="resolveList"></div>
+    <div class="flexend" style="margin-top:14px;">
+      <button class="btn secondary" data-nav="review">← Back: Review</button>
+      <button class="btn" data-nav="export">Next: Export →</button>
+    </div>
   </div>
 </section>
 
@@ -148,6 +156,9 @@
     <h2>Downloads</h2>
     <div class="hint">Generating a file does not mark it dispatched — use the confirm button after you've actually handed the file to the warehouse / carrier.</div>
     <div id="exportList"></div>
+    <div class="flexend" style="margin-top:14px;">
+      <button class="btn secondary" data-nav="resolve">← Back: Resolve</button>
+    </div>
   </div>
 </section>
 
@@ -368,11 +379,18 @@ function detectSaudiShortAddressIssue(fields){
   const found = fields.some(f => re.test(f||""));
   return { ok: found, reason: found ? null : "Missing/malformed Saudi Short Address code (expected 4 letters + 4 digits)" };
 }
+// Typographic punctuation (curly quotes, en/em dash, ellipsis, nbsp) is just
+// normal English formatting, not a language/script issue — never flag it.
+const SAFE_PUNCTUATION = /[‘’‚“”–—… ]/;
 function detectNonAsciiIssue(fields){
-  // Flag ANY character outside basic ASCII (per confirmed rule: flag both Chinese and accented Latin)
-  const re = /[^\x00-\x7F]/;
-  const hit = fields.find(f => f && re.test(f));
-  return hit ? { ok:false, reason: `Non-ASCII character in address/name field: "${hit}"` } : { ok:true };
+  // Flag any character outside ASCII + safe punctuation (per confirmed rule:
+  // flag both Chinese and accented Latin as those indicate an actual script/language)
+  for(const f of fields){
+    if(!f) continue;
+    const bad = [...f].filter(ch => ch.charCodeAt(0) > 127 && !SAFE_PUNCTUATION.test(ch));
+    if(bad.length) return { ok:false, reason: `Non-ASCII character in "${f}": ${[...new Set(bad)].join(" ")}` };
+  }
+  return { ok:true };
 }
 function detectIncompleteAddress(addr1, addr2, city){
   const combined = `${addr1||""} ${addr2||""}`.trim();
@@ -502,9 +520,13 @@ function buildRecords(d365Rows, shopifyOrders, cfg){
     }
 
     if(rec.status !== "HOLD") rec.status = "READY";
+    rec.override = { released: false, note: "" };
     records.push(rec);
   }
   return records;
+}
+function effStatus(rec){
+  return (rec.override && rec.override.released) ? "READY" : rec.status;
 }
 
 /* ======================================================================
@@ -543,7 +565,7 @@ const SF_HEADER = ["warehouseCode","companyCode","monthlyAccount","erpOrderLineN
 function buildSfExport(records, cfg){
   const rows = [SF_HEADER];
   let lineNum = 0;
-  for(const rec of records.filter(r=>r.status==="READY" && r.route==="HK-SF")){
+  for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route==="HK-SF")){
     const so = rec.shopify;
     const addr = sfAddress(so);
     const phone = stripHkPrefix(so.shipPhone);
@@ -569,7 +591,7 @@ const JOB_ORDER_HEADER = ["Shopify reference","Sales order","Item number","Produ
 
 function buildJobOrderExport(records){
   const rows = [JOB_ORDER_HEADER];
-  for(const rec of records.filter(r=>r.status==="READY")){
+  for(const rec of records.filter(r=>effStatus(r)==="READY")){
     const so = rec.shopify, d = rec.d365;
     rows.push([
       d.shopifyRef, d.salesOrder, d.itemNumber, d.productName, rec.kitQty, d.country, d.status, d.createdAt||"",
@@ -583,10 +605,10 @@ function buildJobOrderExport(records){
 function buildIssuesExport(records){
   const detail = [["Shopify reference","Sales order","Route","Reasons","Recipient Name","Country","Resolution status","Operator notes"]];
   const paymentExceptions = [["Name","Email","Financial Status","Total","Shipping Name","Shipping Country"]];
-  for(const rec of records.filter(r=>r.status==="HOLD")){
+  for(const rec of records.filter(r=>r.status==="HOLD" && effStatus(r)==="HOLD")){
     const so = rec.shopify, d = rec.d365;
     detail.push([d.shopifyRef, d.salesOrder, rec.route||"", rec.issues.join(" | "),
-      so?so.shipName:"", rec.country||"", "Open", ""]);
+      so?so.shipName:"", rec.country||"", "Open", rec.override.note||""]);
     if(so && (so.financialStatus === "pending" || so.financialStatus === "expired")){
       paymentExceptions.push([so.name, so.email, so.financialStatus, "", so.shipName, so.shipCountry]);
     }
@@ -596,7 +618,7 @@ function buildIssuesExport(records){
 
 function buildD365ActionList(records){
   const rows = [["Sales order","Shopify reference","Reason","Recommended action"]];
-  for(const rec of records.filter(r=>r.status==="HOLD")){
+  for(const rec of records.filter(r=>r.status==="HOLD" && effStatus(r)==="HOLD")){
     const so = rec.shopify;
     if(so && (so.financialStatus === "pending" || so.financialStatus === "expired" || so.cancelledAt)){
       rows.push([rec.d365.salesOrder, rec.d365.shopifyRef, rec.issues.join(" | "), "Remove from active D365 fulfillment queue (manual — no auto-write in v1)"]);
@@ -611,7 +633,7 @@ const GENERIC_FEDEX_HEADER = ["Route","Shipment reference","Original order","SKU
   "Recipient Name","Address 1","Address 2","City","Country","Zip","Phone","Email","Notes"];
 function buildGenericFedexExport(records, route){
   const rows = [GENERIC_FEDEX_HEADER];
-  for(const rec of records.filter(r=>r.status==="READY" && r.route===route)){
+  for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route===route)){
     const so = rec.shopify, d = rec.d365;
     const shipments = splitFedexQty(rec.kitQty);
     shipments.forEach((qty, idx)=>{
@@ -666,15 +688,20 @@ function toast(msg){
   setTimeout(()=>t.classList.remove("show"), 2200);
 }
 
+const TAB_ORDER = ["upload","review","resolve","export"];
+function switchTab(name){
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("active", b.dataset.tab===name));
+  document.querySelectorAll("main > section").forEach(s=>s.style.display="none");
+  document.getElementById("tab-"+name).style.display="block";
+  if(name==="history") renderHistory();
+  if(name==="config") renderConfig();
+  window.scrollTo(0,0);
+}
 document.querySelectorAll("#tabs button").forEach(btn=>{
-  btn.addEventListener("click", ()=>{
-    document.querySelectorAll("#tabs button").forEach(b=>b.classList.remove("active"));
-    btn.classList.add("active");
-    document.querySelectorAll("main > section").forEach(s=>s.style.display="none");
-    document.getElementById("tab-"+btn.dataset.tab).style.display="block";
-    if(btn.dataset.tab==="history") renderHistory();
-    if(btn.dataset.tab==="config") renderConfig();
-  });
+  btn.addEventListener("click", ()=> switchTab(btn.dataset.tab));
+});
+document.querySelectorAll("[data-nav]").forEach(btn=>{
+  btn.addEventListener("click", ()=> switchTab(btn.dataset.nav));
 });
 
 let uploaded = { d365: null, shopify: null };
@@ -730,20 +757,22 @@ document.getElementById("btnProcess").addEventListener("click", ()=>{
   document.getElementById("dateLabel").textContent = "Processing date: "+date;
   STATE.records = buildRecords(uploaded.d365, uploaded.shopify, CONFIG);
   STATE.processed = true;
-  renderSummary(); renderReviewTable(); renderResolve(); renderExport();
-  document.querySelector('#tabs button[data-tab="review"]').click();
+  refreshAll();
+  switchTab("review");
 });
 
 function renderSummary(){
   const recs = STATE.records;
-  const ready = recs.filter(r=>r.status==="READY");
-  const hold = recs.filter(r=>r.status==="HOLD");
+  const ready = recs.filter(r=>effStatus(r)==="READY");
+  const hold = recs.filter(r=>effStatus(r)==="HOLD");
+  const released = recs.filter(r=>r.status==="HOLD" && effStatus(r)==="READY");
   const byRoute = {};
   ready.forEach(r=>{ byRoute[r.route] = (byRoute[r.route]||0) + r.kitQty; });
   const stats = [
     ["D365 lines received", recs.length],
     ["Ready to dispatch", ready.length],
     ["Held / issues", hold.length],
+    ["Manually released", released.length],
     ["Kits — HK-SF", byRoute["HK-SF"]||0],
     ["Kits — MY-FedEx", byRoute["MY-FEDEX"]||0],
     ["Kits — US-FedEx", byRoute["US-FEDEX"]||0],
@@ -756,6 +785,9 @@ function renderSummary(){
   const badge = document.getElementById("issueBadge");
   if(hold.length){ badge.style.display="inline-block"; badge.textContent = hold.length; }
   else badge.style.display="none";
+}
+function refreshAll(){
+  renderSummary(); renderReviewTable(); renderResolve(); renderExport();
 }
 
 function renderReviewTable(){
@@ -770,12 +802,15 @@ function renderReviewTable(){
       return [r.d365.shopifyRef, r.d365.salesOrder, r.d365.itemNumber, r.route, r.status].join(" ").toLowerCase().includes(f);
     });
     tbody.innerHTML = rows.map(r=>{
-      const pillClass = r.status==="READY" ? "ready" : "hold";
+      const eff = effStatus(r);
+      const pillClass = eff==="READY" ? "ready" : "hold";
+      const overridden = r.status==="HOLD" && eff==="READY";
+      const label = overridden ? "READY (released)" : eff;
       return `<tr>
         <td>${r.d365.shopifyRef}</td><td>${r.d365.salesOrder}</td><td>${r.d365.itemNumber}</td>
         <td>${r.kitQty}</td><td>${r.country||"—"}</td><td>${r.route||"—"}</td>
-        <td><span class="pill ${pillClass}">${r.status}</span></td>
-        <td>${r.issues.map(i=>`<span class="tag">${i}</span>`).join("")}</td>
+        <td><span class="pill ${pillClass}">${label}</span></td>
+        <td>${r.issues.map(i=>`<span class="tag">${i}</span>`).join("")}${r.override.note?`<span class="tag" style="background:var(--ok-bg);color:var(--ok)">note: ${r.override.note}</span>`:""}</td>
       </tr>`;
     }).join("");
   }
@@ -787,13 +822,44 @@ function renderResolve(){
   const held = STATE.records.filter(r=>r.status==="HOLD");
   const el = document.getElementById("resolveList");
   if(!held.length){ el.innerHTML = `<div class="hint">No held orders.</div>`; return; }
-  el.innerHTML = held.map((r,i)=>`
-    <div class="panel" style="margin-bottom:10px;">
-      <div class="kv"><span class="muted">Order</span><b>${r.d365.shopifyRef}</b></div>
-      <div class="kv"><span class="muted">Sales order</span>${r.d365.salesOrder}</div>
+  el.innerHTML = held.map((r,i)=>{
+    const released = r.override.released;
+    return `
+    <div class="panel" style="margin-bottom:10px;${released?"border-color:var(--ok);":""}">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div class="kv"><span class="muted">Order</span><b>${r.d365.shopifyRef}</b></div>
+          <div class="kv"><span class="muted">Sales order</span>${r.d365.salesOrder}</div>
+          <div class="kv"><span class="muted">Route</span>${r.route||"—"}</div>
+        </div>
+        <span class="pill ${released?"ready":"hold"}">${released?"RELEASED — will dispatch":"HOLD"}</span>
+      </div>
       <ul class="issue-list">${r.issues.map(i=>`<li>⚠ ${i}</li>`).join("")}</ul>
-      <textarea rows="2" placeholder="Operator note / correction (does not overwrite source data)" id="note-${i}"></textarea>
-    </div>`).join("");
+      <textarea rows="2" placeholder="Why this is OK to release (e.g. Chinese characters are fine for HK-SF; apostrophe in address is normal punctuation)" data-note="${i}">${r.override.note||""}</textarea>
+      <div class="flexend" style="margin-top:8px;">
+        ${released
+          ? `<button class="btn secondary small" data-undo="${i}">Undo — put back on hold</button>`
+          : `<button class="btn small" data-release="${i}">Release — include in dispatch</button>`}
+      </div>
+    </div>`;
+  }).join("");
+  held.forEach((r,i)=>{
+    const noteEl = el.querySelector(`[data-note="${i}"]`);
+    if(noteEl) noteEl.addEventListener("change", ()=>{ r.override.note = noteEl.value; });
+    const relBtn = el.querySelector(`[data-release="${i}"]`);
+    if(relBtn) relBtn.addEventListener("click", ()=>{
+      r.override.note = noteEl ? noteEl.value : r.override.note;
+      r.override.released = true;
+      refreshAll();
+      toast(`${r.d365.shopifyRef} released — will be included in dispatch exports`);
+    });
+    const undoBtn = el.querySelector(`[data-undo="${i}"]`);
+    if(undoBtn) undoBtn.addEventListener("click", ()=>{
+      r.override.released = false;
+      refreshAll();
+      toast(`${r.d365.shopifyRef} put back on hold`);
+    });
+  });
 }
 
 function renderExport(){
@@ -856,7 +922,8 @@ function renderConfig(){
       <li>D365 eligibility = Status "Open order" + Exported=0 + Deliver remainder&gt;0; kit qty = Deliver remainder</li>
       <li>Orders missing from the day's Shopify export are held — re-upload a wider-range export to release</li>
       <li>South Korea is currently held as suspended (overrides the Manual-FedEx list)</li>
-      <li>Any non-ASCII character (Chinese or accented Latin) in name/address fields is flagged for review</li>
+      <li>Any non-ASCII character (Chinese or accented Latin) in name/address fields is flagged for review — curly quotes/dashes are exempted as normal punctuation</li>
+      <li>Held orders can be manually released (Resolve tab) to include them in dispatch anyway — recorded with a note, kept separate from the original held status</li>
       <li>FedEx split: fill to 4 kits/shipment, rebalance the last two shipments to avoid a 1-kit remainder</li>
       <li>D365 "move out of queue" = action list only in v1, no automatic D365 writes</li>
     </ul>`;
