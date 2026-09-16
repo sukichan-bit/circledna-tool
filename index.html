@@ -1117,13 +1117,15 @@ function renderResolve(){
 function renderExport(){
   const date = document.getElementById("processingDate").value.trim() || "unknown-date";
   const items = [
-    { key:"sf", label:`HK–SF: ${date} orders for SF.xlsx`, build:()=>[["test", buildSfExport(STATE.records, CONFIG)]] },
-    { key:"joborders", label:`Job orders 2026: Job orders ${date}.xlsx`, build:()=>[["D365", buildJobOrderExport(STATE.records)]] },
-    { key:"issues", label:`Issues: Issue orders ${date}.xlsx — paste tabs directly into the On Hold Order sheet (Shopify on hold orders / Expired orders in Shopify / D365 action list)`, build:()=>buildIssuesExport(STATE.records) },
-    { key:"myfedex", label:`MY–FedEx: MY Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildMyFedexExport(STATE.records)]] },
-    { key:"usfedex", label:`US–FedEx: US Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildUsFedexExport(STATE.records)]] },
-    { key:"intlfedex", label:`Intl–FedEx: Intl Circle Exome Orders ${date}.xlsx`, build:()=>[["Sheet1", buildIntlFedexExport(STATE.records)]] },
-    { key:"manual", label:`Manual fulfillment: Manual fulfillment orders ${date}.xlsx (FedEx Outbound ID/JP/PH, FedEx Outbound IN, FedEx Return, DHL tabs — PH return is manual via the UPS website, not in this file)`,
+    { key:"sf", label:"HK–SF", filename:`${date} orders for SF.xlsx`, build:()=>[["test", buildSfExport(STATE.records, CONFIG)]] },
+    { key:"joborders", label:"Job orders 2026", filename:`Job orders ${date}.xlsx`, build:()=>[["D365", buildJobOrderExport(STATE.records)]] },
+    { key:"issues", label:"Issues — paste tabs directly into the On Hold Order sheet (Shopify on hold orders / Expired orders in Shopify / D365 action list)",
+      filename:`Issue orders ${date}.xlsx`, build:()=>buildIssuesExport(STATE.records) },
+    { key:"myfedex", label:"MY–FedEx", filename:`MY Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildMyFedexExport(STATE.records)]] },
+    { key:"usfedex", label:"US–FedEx", filename:`US Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildUsFedexExport(STATE.records)]] },
+    { key:"intlfedex", label:"Intl–FedEx", filename:`Intl Circle Exome Orders ${date}.xlsx`, build:()=>[["Sheet1", buildIntlFedexExport(STATE.records)]] },
+    { key:"manual", label:"Manual fulfillment (FedEx Outbound ID/JP/PH, FedEx Outbound IN, FedEx Return, DHL tabs — PH return is manual via the UPS website, not in this file)",
+      filename:`Manual fulfillment orders ${date}.xlsx`,
       build:()=>[
         ["FedEx Outbound (ID-JP-PH)", buildManualFedexOutboundA(STATE.records)],
         ["FedEx Outbound (IN)", buildManualFedexOutboundB(STATE.records)],
@@ -1133,7 +1135,7 @@ function renderExport(){
   ];
   document.getElementById("exportList").innerHTML = items.map(it=>`
     <div class="row" style="align-items:center;border-bottom:1px solid var(--border);padding:9px 0;">
-      <div class="col" style="flex:3;">${it.label}</div>
+      <div class="col" style="flex:3;"><b>${it.filename}</b> — ${it.label}</div>
       <div class="col" style="flex:0 0 auto;display:flex;gap:6px;">
         <button class="btn small" data-download="${it.key}">Download</button>
         <button class="btn secondary small" data-dispatch="${it.key}">Mark dispatched</button>
@@ -1142,7 +1144,7 @@ function renderExport(){
   items.forEach(it=>{
     document.querySelector(`[data-download="${it.key}"]`).onclick = ()=>{
       const sheets = it.build();
-      writeWorkbook(sheets, it.label.split(":")[1]?.trim().split(" (")[0] || `${it.key}-${date}.xlsx`);
+      writeWorkbook(sheets, it.filename);
       recordGenerated(date, it.key);
     };
     document.querySelector(`[data-dispatch="${it.key}"]`).onclick = ()=> markDispatched(date, it.key);
