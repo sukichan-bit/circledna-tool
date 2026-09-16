@@ -466,6 +466,12 @@ function splitFedexQty(qty){
 function shipmentRef(baseRef, idx){
   return idx === 0 ? baseRef : `${baseRef}_${idx}`;
 }
+// Sorts order lines by the numeric part of the Shopify reference (e.g. "DNA-15274" -> 15274)
+// ascending, smallest first, rather than however D365's export happened to order them.
+function orderNumForSort(ref){
+  const m = String(ref||"").match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+}
 
 /* ======================================================================
    PHONE / ERP HELPERS (HK–SF)
@@ -1000,6 +1006,7 @@ document.getElementById("btnProcess").addEventListener("click", ()=>{
   if(!date){ toast("Enter a processing date first"); return; }
   document.getElementById("dateLabel").textContent = "Processing date: "+date;
   STATE.records = buildRecords(uploaded.d365, uploaded.shopify, CONFIG);
+  STATE.records.sort((a,b) => orderNumForSort(a.d365.shopifyRef) - orderNumForSort(b.d365.shopifyRef));
   STATE.processed = true;
   refreshAll();
   switchTab("review");
