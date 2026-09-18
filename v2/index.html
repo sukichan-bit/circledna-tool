@@ -598,12 +598,23 @@ function buildRecords(d365Rows, shopifyOrders, cfg){
       }
     }
     if(rec.status !== "HOLD") rec.status = "READY";
-    rec.override = { released: false, note: "" };
+    rec.override = { released: false, note: "", addr1: null, addr2: null };
     records.push(rec);
   }
   return records;
 }
 function effStatus(rec){ return (rec.override && rec.override.released) ? "READY" : rec.status; }
+// Manually-edited Address Line 1/2 (typed on the Resolve tab) take priority
+// over the auto-split result once set, so a corrected address actually
+// reaches the export instead of the original overflowing/auto-split text.
+function effFedexAddr(rec){
+  const auto = rec.fedexAddr || { line1: "", line2: "" };
+  const ov = rec.override || {};
+  return {
+    line1: ov.addr1 != null ? ov.addr1 : auto.line1,
+    line2: ov.addr2 != null ? ov.addr2 : auto.line2
+  };
+}
 
 /* ======================================================================
    EXPORT BUILDERS
@@ -690,7 +701,7 @@ function buildShopifyOnHoldExport(records){
     for(let k=0;k<qty;k++){
       rows.push([
         d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
-        so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country||"",
+        so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
         textSafe(so?so.shipZip:""), so?normalizePhoneForFedex(so.shipPhone, rec.country):"", so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
         rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", so?extractTaxId(so):"", "Y",
@@ -756,7 +767,7 @@ function buildManualRows(records, route){
     for(let k=0;k<rec.kitQty;k++){
       rows.push([
         d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
-        so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country||"",
+        so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
         textSafe(so?so.shipZip:""), normalizePhoneForManual(so?so.shipPhone:""), so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
         rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y",
@@ -818,7 +829,7 @@ function buildManualFedexOutboundRows(records, countries, sheetProfile){
       for(let k=0;k<qty;k++){
         const base = [
           txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
-          so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country,
+          so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, p.hsCode, p.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
           p.purposeOfShipment, p.returnReason, "N"
@@ -843,7 +854,7 @@ function buildManualFedexReturnRows(records){
       for(let k=0;k<qty;k++){
         rows.push([
           txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
-          so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country,
+          so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, 39269090, "HK", 1, p.unitValue, "Pcs", p.commodityWeight, "KGS", "Prenetics Limited",
           "Y", "6", "Y", "661486660", p.purposeOfShipment, p.returnReason, "4", p.commodityWeight, "KGS", "N",
@@ -865,7 +876,7 @@ function fedexRows(records, route, header, includeMid, wantNoInventory){
       for(let k=0;k<qty;k++){
         const row = [
           txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
-          so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country||"",
+          so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
           rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y"
@@ -990,6 +1001,9 @@ function renderResolve(){
   if(!held.length){ el.innerHTML = `<div style="color:var(--fg2);font-size:13px;">No held orders.</div>`; return; }
   el.innerHTML = held.map((r,i)=>{
     const released = r.override.released;
+    const showAddrEdit = r.route !== "HK-SF" && !!r.fedexAddr;
+    const eff = showAddrEdit ? effFedexAddr(r) : {line1:"",line2:""};
+    const inputStyle = "width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-card);color:var(--fg1);box-sizing:border-box;";
     return `
     <div style="background:var(--bg-section);border:1px solid ${released?'var(--im8-red-algae)':'var(--border-soft)'};border-radius:12px;padding:16px;margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
@@ -1001,7 +1015,11 @@ function renderResolve(){
         <span style="${pillStyle(released?'ready':'hold')}">${released?"RELEASED — will dispatch":"HOLD"}</span>
       </div>
       <ul style="list-style:none;margin:10px 0;padding:0;">${r.issues.map(i=>`<li style="padding:2px 0;font-size:12px;color:var(--fg1);font-family:var(--font-sans);">⚠ ${i}</li>`).join("")}</ul>
-      <textarea rows="2" placeholder="Why this is OK to release (e.g. Chinese characters are fine for HK-SF; apostrophe in address is normal punctuation)" data-note="${i}" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-card);color:var(--fg1);box-sizing:border-box;">${r.override.note||""}</textarea>
+      ${showAddrEdit ? `
+      <div style="${KV}"><span style="color:var(--fg2);">Address Line 1</span><input type="text" maxlength="35" placeholder="Max 35 characters" data-addr1="${i}" value="${eff.line1.replace(/"/g,'&quot;')}" style="${inputStyle}"></div>
+      <div style="${KV}"><span style="color:var(--fg2);">Address Line 2</span><input type="text" maxlength="35" placeholder="Max 35 characters" data-addr2="${i}" value="${eff.line2.replace(/"/g,'&quot;')}" style="${inputStyle}"></div>
+      ` : ""}
+      <textarea rows="2" placeholder="Why this is OK to release (e.g. Chinese characters are fine for HK-SF; apostrophe in address is normal punctuation)" data-note="${i}" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:8px 10px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-card);color:var(--fg1);box-sizing:border-box;margin-top:8px;">${r.override.note||""}</textarea>
       <div style="display:flex;justify-content:flex-end;margin-top:10px;">
         ${released
           ? `<button data-undo="${i}" style="${BTN_SMALL}background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);">Undo — put back on hold</button>`
@@ -1012,9 +1030,13 @@ function renderResolve(){
   held.forEach((r,i)=>{
     const noteEl = el.querySelector(`[data-note="${i}"]`);
     if(noteEl) noteEl.addEventListener("change", ()=>{ r.override.note = noteEl.value; });
+    const addr1El = el.querySelector(`[data-addr1="${i}"]`);
+    const addr2El = el.querySelector(`[data-addr2="${i}"]`);
     const relBtn = el.querySelector(`[data-release="${i}"]`);
     if(relBtn) relBtn.addEventListener("click", ()=>{
       r.override.note = noteEl ? noteEl.value : r.override.note;
+      if(addr1El) r.override.addr1 = addr1El.value;
+      if(addr2El) r.override.addr2 = addr2El.value;
       r.override.released = true;
       refreshAll();
       toast(`${r.d365.shopifyRef} released — will be included in dispatch exports`);
@@ -1140,6 +1162,7 @@ function renderConfig(){
         "Issues workbook tabs are named to match the live On Hold Order Google Sheet exactly, for direct copy-paste: \"Shopify on hold orders\" (40-col shipment layout + Route/Reason columns appended) and \"Expired orders in Shopify\" (exact replica of the raw Shopify export row(s), not a re-derived summary)",
         "Shopify/FedEx product display names are per-SKU (CONFIG.skuToSfItemName / skuToShipmentReference) — add new products there rather than assuming \"Circle Exome Premium\"",
         "FedEx-family exports re-split Recipient Address Line 1/2 to fit FedEx's 35-char-per-line limit, cutting only on comma boundaries (never mid-word); if it still can't fit in 2 lines, the order is held for review instead of silently truncating",
+        "Held orders bound for any FedEx-family route can have Address Line 1/2 hand-edited right on the Resolve tab (pre-filled with the auto-split) — release uses your typed values instead of the auto-split for every export from then on",
         "Any SKU other than what's listed in \"SKU → SF item name mapping\" above is held as an unrecognized product — add it there (and to skuToShipmentReference) once confirmed rather than assuming it's Premium",
         "No-inventory products (Vital V2) always land in the Manual fulfillment workbook: HK → the SF-format tab there; IN and DHL-list countries → their existing manual tabs (already product-agnostic); everything else (ID/JP/PH/MY/US/other Intl) → the \"FedEx Outbound (ID-JP-PH)\" tab, using its profile as a generic default for countries it doesn't have one for"
       ].map(li=>`<li style="padding:3px 0;font-size:12.5px;color:var(--fg1);font-family:var(--font-sans);">${li}</li>`).join("")}
