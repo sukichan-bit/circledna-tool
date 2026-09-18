@@ -828,7 +828,7 @@ function buildManualFedexOutboundRows(records, countries, sheetProfile){
       const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
       for(let k=0;k<qty;k++){
         const base = [
-          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
+          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, p.hsCode, p.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
@@ -853,7 +853,7 @@ function buildManualFedexReturnRows(records){
       const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
       for(let k=0;k<qty;k++){
         rows.push([
-          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
+          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, 39269090, "HK", 1, p.unitValue, "Pcs", p.commodityWeight, "KGS", "Prenetics Limited",
