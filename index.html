@@ -106,9 +106,10 @@
       </div>
       <div class="col">
         <div class="dropzone" id="dz-shopify">
-          <input type="file" id="file-shopify" accept=".csv">
+          <input type="file" id="file-shopify" accept=".csv" multiple>
           <div>🛒 <b>Shopify orders export</b> (.csv)</div>
-          <div class="fname" id="fname-shopify">Click or drop file</div>
+          <div class="fname" id="fname-shopify">Click or drop file(s)</div>
+          <div class="ftype">You can add more than one file — e.g. upload a supplementary export for an older order that's back in D365 but missing from today's export, without re-uploading the original file</div>
         </div>
       </div>
     </div>
@@ -959,50 +960,66 @@ document.querySelectorAll("[data-nav]").forEach(btn=>{
 });
 
 let uploaded = { d365: null, shopify: null };
+let shopifyFileNames = [];
 function wireDropzone(zoneId, fileId, onLoad){
   const zone = document.getElementById(zoneId), input = document.getElementById(fileId);
   zone.addEventListener("click", ()=>input.click());
   zone.addEventListener("dragover", e=>{e.preventDefault(); zone.style.borderColor="var(--accent)";});
   zone.addEventListener("drop", e=>{
     e.preventDefault();
-    if(e.dataTransfer.files.length) { input.files = e.dataTransfer.files; onLoad(e.dataTransfer.files[0]); }
+    if(e.dataTransfer.files.length) { input.files = e.dataTransfer.files; onLoad(e.dataTransfer.files); }
   });
-  input.addEventListener("change", ()=>{ if(input.files.length) onLoad(input.files[0]); });
+  input.addEventListener("change", ()=>{ if(input.files.length) onLoad(input.files); });
 }
-function markFilled(zoneId, fnameId, file){
+function markFilled(zoneId, fnameId, displayName){
   document.getElementById(zoneId).classList.add("filled");
-  document.getElementById(fnameId).textContent = file.name;
+  document.getElementById(fnameId).textContent = displayName;
 }
 function checkReady(){
   document.getElementById("btnProcess").disabled = !(uploaded.d365 && uploaded.shopify);
 }
 
-wireDropzone("dz-d365","file-d365", file=>{
+wireDropzone("dz-d365","file-d365", files=>{
+  const file = files[0];
   const reader = new FileReader();
   reader.onload = e=>{
     try{
       const wb = XLSX.read(e.target.result, {type:"array", cellDates:true});
       uploaded.d365 = d365WorkbookToRows(wb);
-      markFilled("dz-d365","fname-d365",file);
+      markFilled("dz-d365","fname-d365",file.name);
       document.getElementById("uploadStatus").textContent = `D365: ${uploaded.d365.length} order lines loaded.`;
       checkReady();
     }catch(err){ toast("Failed to parse D365 file: "+err.message); }
   };
   reader.readAsArrayBuffer(file);
 });
-wireDropzone("dz-shopify","file-shopify", file=>{
-  const reader = new FileReader();
-  reader.onload = e=>{
-    try{
-      uploaded.shopify = shopifyCsvToOrders(e.target.result);
-      markFilled("dz-shopify","fname-shopify",file);
-      const n = Object.keys(uploaded.shopify).length;
-      document.getElementById("uploadStatus").textContent =
-        (uploaded.d365?`D365: ${uploaded.d365.length} order lines loaded. `:"") + `Shopify: ${n} orders loaded.`;
-      checkReady();
-    }catch(err){ toast("Failed to parse Shopify CSV: "+err.message); }
-  };
-  reader.readAsText(file);
+function loadOneShopifyFile(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      try{
+        const parsed = shopifyCsvToOrders(e.target.result);
+        if(!uploaded.shopify) uploaded.shopify = {};
+        Object.assign(uploaded.shopify, parsed); // additive: later files supplement/override same-name orders, others just add in
+        shopifyFileNames.push(file.name);
+        resolve();
+      }catch(err){ reject(err); }
+    };
+    reader.onerror = ()=>reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+wireDropzone("dz-shopify","file-shopify", async files=>{
+  for(const file of Array.from(files)){
+    try{ await loadOneShopifyFile(file); }
+    catch(err){ toast(`Failed to parse ${file.name}: ${err.message}`); }
+  }
+  markFilled("dz-shopify","fname-shopify", shopifyFileNames.join(", "));
+  const n = Object.keys(uploaded.shopify||{}).length;
+  document.getElementById("uploadStatus").textContent =
+    (uploaded.d365?`D365: ${uploaded.d365.length} order lines loaded. `:"") +
+    `Shopify: ${n} orders loaded from ${shopifyFileNames.length} file${shopifyFileNames.length===1?"":"s"}.`;
+  checkReady();
 });
 
 document.getElementById("btnProcess").addEventListener("click", ()=>{
