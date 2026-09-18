@@ -506,6 +506,24 @@ function extractTaxId(so){
   }
   return "";
 }
+// FedEx-family templates cap Recipient Address Line 1/2 at 35 chars each.
+// Combine Shopify's own addr1/addr2 into one address, then re-split on
+// comma boundaries (never breaking a word/segment across the 35-char cut)
+// so line 1 is packed as full as possible and the rest spills into line 2.
+const FEDEX_ADDR_LINE_LIMIT = 35;
+function splitAddressForFedex(addr1, addr2){
+  const full = [addr1, addr2].map(s=>(s||"").trim()).filter(Boolean).join(", ");
+  const segments = full.split(",").map(s=>s.trim()).filter(Boolean);
+  const lines = [""];
+  for(const seg of segments){
+    const cur = lines[lines.length-1];
+    const candidate = cur ? `${cur}, ${seg}` : seg;
+    if(candidate.length <= FEDEX_ADDR_LINE_LIMIT) lines[lines.length-1] = candidate;
+    else lines.push(seg);
+  }
+  const line1 = lines[0]||"", line2 = lines.slice(1).join(", ");
+  return { line1, line2, overflow: lines.length > 2 || line2.length > FEDEX_ADDR_LINE_LIMIT };
+}
 
 /* ======================================================================
    MATCH + BUILD RECORDS
@@ -521,6 +539,13 @@ function buildRecords(d365Rows, shopifyOrders, cfg){
     if(!eligible){
       rec.status = "HOLD";
       rec.issues.push(`D365 not eligible (status="${d.status}", exported=${d.exported}, deliverRemainder=${d.deliverRemainder})`);
+    }
+    // --- Unknown product: only PRE-FG-000021 (Premium) and whatever else is
+    // in skuToShipmentReference are recognized. Anything else is held so a
+    // new/unmapped product never silently ships as "Circle Exome Premium".
+    if(!Object.keys(cfg.skuToShipmentReference).includes(d.itemNumber)){
+      rec.status = "HOLD";
+      rec.issues.push(`Unrecognized SKU "${d.itemNumber}" — not a known product, held for review`);
     }
     if(!so){
       rec.status = "HOLD";
@@ -562,6 +587,14 @@ function buildRecords(d365Rows, shopifyOrders, cfg){
       if(finalCountry === "SA"){
         const saudi = detectSaudiShortAddressIssue(fields);
         if(!saudi.ok){ rec.status = "HOLD"; rec.issues.push(saudi.reason); }
+      }
+      // FedEx-family exports (everything except HK-SF) need Address Line 1/2
+      // re-split to fit FedEx's 35-char-per-line limit without breaking a
+      // comma-separated segment across the boundary.
+      rec.fedexAddr = splitAddressForFedex(so.shipAddr1, so.shipAddr2);
+      if(rec.route !== "HK-SF" && rec.fedexAddr.overflow){
+        rec.status = "HOLD";
+        rec.issues.push(`Address exceeds FedEx's 35-char-per-line limit even after splitting on commas: "${[so.shipAddr1, so.shipAddr2].filter(Boolean).join(", ")}"`);
       }
     }
     if(rec.status !== "HOLD") rec.status = "READY";
@@ -657,7 +690,7 @@ function buildShopifyOnHoldExport(records){
     for(let k=0;k<qty;k++){
       rows.push([
         d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
-        so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country||"",
+        so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country||"",
         textSafe(so?so.shipZip:""), so?normalizePhoneForFedex(so.shipPhone, rec.country):"", so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
         rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", so?extractTaxId(so):"", "Y",
@@ -723,7 +756,7 @@ function buildManualRows(records, route){
     for(let k=0;k<rec.kitQty;k++){
       rows.push([
         d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
-        so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country||"",
+        so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country||"",
         textSafe(so?so.shipZip:""), normalizePhoneForManual(so?so.shipPhone:""), so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
         rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y",
@@ -762,16 +795,30 @@ const MANUAL_FEDEX_RETURN_HEADER = ["Transaction ID","Sender Code","Service Type
 function buildManualFedexOutboundRows(records, countries, sheetProfile){
   const header = sheetProfile==="A" ? MANUAL_FEDEX_OUTBOUND_HEADER_A : MANUAL_FEDEX_OUTBOUND_HEADER_B;
   const rows = [header];
-  for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route==="MANUAL-FEDEX" && countries.includes(r.country))){
+  // Regular Manual-FedEx orders (ID/JP/PH -> "A", IN -> "B") plus, on tab "A"
+  // only, any no-inventory order that would otherwise have gone to an
+  // automated MY/US/Intl-FedEx file — FedEx/SF hold no stock for those
+  // products, so they land here regardless of destination country (IN
+  // already routes to MANUAL-FEDEX regardless of product, so it never
+  // needs this extra branch).
+  const filtered = records.filter(r=>{
+    if(effStatus(r)!=="READY") return false;
+    if(r.route==="MANUAL-FEDEX" && countries.includes(r.country)) return true;
+    if(sheetProfile==="A" && r.noInventory && ["MY-FEDEX","US-FEDEX","INTL-FEDEX"].includes(r.route)) return true;
+    return false;
+  });
+  for(const rec of filtered){
     const so = rec.shopify, d = rec.d365;
-    const p = CONFIG.manualFedexOutboundProfiles[rec.country];
+    // Countries outside the confirmed ID/JP/PH/IN templates have no profile
+    // of their own — fall back to the ID/JP/PH profile as a generic default.
+    const p = CONFIG.manualFedexOutboundProfiles[rec.country] || CONFIG.manualFedexOutboundProfiles["ID"];
     const shipments = splitFedexQty(rec.kitQty);
     shipments.forEach((qty, sIdx)=>{
       const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
       for(let k=0;k<qty;k++){
         const base = [
           txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
-          so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country,
+          so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, p.hsCode, p.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
           p.purposeOfShipment, p.returnReason, "N"
@@ -796,7 +843,7 @@ function buildManualFedexReturnRows(records){
       for(let k=0;k<qty;k++){
         rows.push([
           txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", "",
-          so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country,
+          so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, 39269090, "HK", 1, p.unitValue, "Pcs", p.commodityWeight, "KGS", "Prenetics Limited",
           "Y", "6", "Y", "661486660", p.purposeOfShipment, p.returnReason, "4", p.commodityWeight, "KGS", "N",
@@ -818,7 +865,7 @@ function fedexRows(records, route, header, includeMid, wantNoInventory){
       for(let k=0;k<qty;k++){
         const row = [
           txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
-          so?so.shipName:"", so?so.shipAddr1:"", so?(so.shipAddr2||""):"", so?so.shipCity:"", rec.country||"",
+          so?so.shipName:"", rec.fedexAddr?rec.fedexAddr.line1:"", rec.fedexAddr?rec.fedexAddr.line2:"", so?so.shipCity:"", rec.country||"",
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
           rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y"
@@ -833,9 +880,6 @@ function fedexRows(records, route, header, includeMid, wantNoInventory){
 function buildIntlFedexExport(records){ return fedexRows(records, "INTL-FEDEX", FEDEX_HEADER_INTL, false); }
 function buildMyFedexExport(records){ return fedexRows(records, "MY-FEDEX", FEDEX_HEADER_MY, false); }
 function buildUsFedexExport(records){ return fedexRows(records, "US-FEDEX", FEDEX_HEADER_US, true); }
-function buildIntlFedexNoInventoryExport(records){ return fedexRows(records, "INTL-FEDEX", FEDEX_HEADER_INTL, false, true); }
-function buildMyFedexNoInventoryExport(records){ return fedexRows(records, "MY-FEDEX", FEDEX_HEADER_MY, false, true); }
-function buildUsFedexNoInventoryExport(records){ return fedexRows(records, "US-FEDEX", FEDEX_HEADER_US, true, true); }
 function buildManualDhlExport(records){ return buildManualRows(records, "MANUAL-DHL"); }
 
 /* ======================================================================
@@ -926,8 +970,9 @@ function renderReviewTable(){
       const overridden = r.status==="HOLD" && eff==="READY";
       const label = overridden ? "READY (released)" : eff;
       const manualNote = r.route==="MANUAL-FEDEX" ? (CONFIG.manualFedexNotes[r.country]||"") : "";
-      const noInvNote = (r.noInventory && ["HK-SF","MY-FEDEX","US-FEDEX","INTL-FEDEX"].includes(r.route))
-        ? `No FedEx/SF inventory — goes to Manual fulfillment (${r.route} no-inventory tab) instead of the ${r.route} file` : "";
+      const noInvNote = (r.noInventory && r.route==="HK-SF") ? "No FedEx/SF inventory — goes to Manual fulfillment (SF-format tab) instead of the SF file"
+        : (r.noInventory && ["MY-FEDEX","US-FEDEX","INTL-FEDEX"].includes(r.route)) ? "No FedEx/SF inventory — goes to Manual fulfillment (FedEx Outbound tab) instead of the automated file"
+        : "";
       return `<tr>
         <td style="${TABLE_TD_NOWRAP}">${r.d365.shopifyRef}</td><td style="${TABLE_TD_NOWRAP}">${r.d365.salesOrder}</td><td style="${TABLE_TD_NOWRAP}">${r.d365.itemNumber}</td>
         <td style="${TABLE_TD}">${r.kitQty}</td><td style="${TABLE_TD}">${r.country||"—"}</td><td style="${TABLE_TD}">${r.route||"—"}</td>
@@ -992,17 +1037,14 @@ function renderExport(){
     { key:"myfedex", label:"MY–FedEx", filename:`MY Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildMyFedexExport(STATE.records)]] },
     { key:"usfedex", label:"US–FedEx", filename:`US Circle Exome Orders ${date}.xlsx`, build:()=>[["test", buildUsFedexExport(STATE.records)]] },
     { key:"intlfedex", label:"Intl–FedEx", filename:`Intl Circle Exome Orders ${date}.xlsx`, build:()=>[["Sheet1", buildIntlFedexExport(STATE.records)]] },
-    { key:"manual", label:"Manual fulfillment (FedEx Outbound ID/JP/PH, FedEx Outbound IN, FedEx Return, DHL tabs, plus a no-inventory tab per route for products FedEx/SF don't stock — PH return is manual via the UPS website, not in this file)",
+    { key:"manual", label:"Manual fulfillment (FedEx Outbound ID/JP/PH also covers MY/US/Intl no-inventory orders, FedEx Outbound IN, FedEx Return, DHL, and an SF-format tab for HK no-inventory orders — PH return is manual via the UPS website, not in this file)",
       filename:`Manual fulfillment orders ${date}.xlsx`,
       build:()=>[
         ["FedEx Outbound (ID-JP-PH)", buildManualFedexOutboundA(STATE.records)],
         ["FedEx Outbound (IN)", buildManualFedexOutboundB(STATE.records)],
         ["FedEx Return", buildManualFedexReturnRows(STATE.records)],
         ["DHL", buildManualDhlExport(STATE.records)],
-        ["SF (no inventory)", buildSfNoInventoryExport(STATE.records, CONFIG)],
-        ["MY-FedEx (no inventory)", buildMyFedexNoInventoryExport(STATE.records)],
-        ["US-FedEx (no inventory)", buildUsFedexNoInventoryExport(STATE.records)],
-        ["Intl-FedEx (no inventory)", buildIntlFedexNoInventoryExport(STATE.records)]
+        ["SF (no inventory)", buildSfNoInventoryExport(STATE.records, CONFIG)]
       ] },
   ];
   document.getElementById("exportList").innerHTML = items.map(it=>`
@@ -1033,16 +1075,51 @@ function renderHistory(){
       <td style="${TABLE_TD}">${Object.entries(r.dispatched||{}).map(([k,t])=>`<span style="${TAG_STYLE}">${k}: ${new Date(t).toLocaleString()}</span>`).join("") || "—"}</td>
     </tr>`).join("") || `<tr><td colspan="3" style="${TABLE_TD}color:var(--fg2);">No runs yet.</td></tr>`;
 }
+function renderCountryList(containerId, listKey){
+  const el = document.getElementById(containerId);
+  const list = CONFIG[listKey];
+  el.innerHTML = list.map(c=>
+    `<span style="${TAG_STYLE}cursor:pointer;" data-remove="${c}" title="Click to remove">${c} ×</span>`).join("") +
+    `<input type="text" maxlength="2" placeholder="+code" data-add-country style="width:52px;display:inline-block;padding:2px 6px;font-size:11px;margin-left:2px;font-family:var(--font-sans);border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-card);color:var(--fg1);">`;
+  el.querySelectorAll("[data-remove]").forEach(tag=>{
+    tag.addEventListener("click", ()=>{
+      const code = tag.dataset.remove;
+      CONFIG[listKey] = CONFIG[listKey].filter(c=>c!==code);
+      saveConfig(CONFIG); renderConfig(); toast(`Removed ${code} from ${listKey}`);
+    });
+  });
+  const input = el.querySelector("[data-add-country]");
+  input.addEventListener("keydown", e=>{
+    if(e.key !== "Enter") return;
+    const code = input.value.trim().toUpperCase();
+    if(code.length !== 2){ toast("Enter a 2-letter country code"); return; }
+    if(!CONFIG[listKey].includes(code)) CONFIG[listKey].push(code);
+    saveConfig(CONFIG); renderConfig(); toast(`Added ${code} to ${listKey}`);
+  });
+}
 function renderConfig(){
   const routingEl = document.getElementById("cfgRouting");
+  const inputStyle = "font-family:var(--font-sans);font-size:13px;padding:6px 8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-card);color:var(--fg1);max-width:70px;text-transform:uppercase;";
   routingEl.innerHTML = `
-    <div style="${KV}"><span style="color:var(--fg2);">HK → SF</span><code style="background:var(--bg-section);padding:1px 6px;border-radius:4px;font-size:11.5px;">${CONFIG.hkSfCountry}</code></div>
-    <div style="${KV}"><span style="color:var(--fg2);">MY → FedEx</span><code style="background:var(--bg-section);padding:1px 6px;border-radius:4px;font-size:11.5px;">${CONFIG.myFedexCountry}</code></div>
-    <div style="${KV}"><span style="color:var(--fg2);">US → FedEx</span><code style="background:var(--bg-section);padding:1px 6px;border-radius:4px;font-size:11.5px;">${CONFIG.usFedexCountry}</code></div>
-    <div style="${KV}"><span style="color:var(--fg2);">Manual-FedEx</span>${CONFIG.manualFedex.map(c=>`<span style="${TAG_STYLE}">${c}</span>`).join("")}</div>
-    <div style="${KV}"><span style="color:var(--fg2);">Manual-DHL</span>${CONFIG.manualDhl.map(c=>`<span style="${TAG_STYLE}">${c}</span>`).join("")}</div>
-    <div style="${KV}"><span style="color:var(--fg2);">Suspended</span>${CONFIG.suspended.map(c=>`<span style="${TAG_STYLE}background:var(--status-urgent-bg);color:var(--status-urgent);">${c}</span>`).join("")}</div>
-    <div style="color:var(--fg2);font-size:12.5px;margin-top:6px;">All other valid countries route to Intl-FedEx. Edit via Export/Import JSON for now.</div>`;
+    <div style="${KV}"><span style="color:var(--fg2);">HK → SF</span><input type="text" id="cfgHkSf" maxlength="2" value="${CONFIG.hkSfCountry}" style="${inputStyle}"></div>
+    <div style="${KV}"><span style="color:var(--fg2);">MY → FedEx</span><input type="text" id="cfgMyFedex" maxlength="2" value="${CONFIG.myFedexCountry}" style="${inputStyle}"></div>
+    <div style="${KV}"><span style="color:var(--fg2);">US → FedEx</span><input type="text" id="cfgUsFedex" maxlength="2" value="${CONFIG.usFedexCountry}" style="${inputStyle}"></div>
+    <div style="${KV}"><span style="color:var(--fg2);">Manual-FedEx</span><div id="cfgListManualFedex"></div></div>
+    <div style="${KV}"><span style="color:var(--fg2);">Manual-DHL</span><div id="cfgListManualDhl"></div></div>
+    <div style="${KV}"><span style="color:var(--fg2);">Suspended</span><div id="cfgListSuspended"></div></div>
+    <div style="color:var(--fg2);font-size:12.5px;margin-top:6px;">Type a code and press Enter to add; click a tag to remove it. Checked in this order: Suspended → HK → Manual-FedEx → Manual-DHL → MY → US → everything else is Intl-FedEx. Changes save immediately but only apply the next time you click "Process orders".</div>`;
+  document.getElementById("cfgHkSf").addEventListener("change", e=>{
+    CONFIG.hkSfCountry = e.target.value.trim().toUpperCase(); saveConfig(CONFIG); toast("HK → SF country updated");
+  });
+  document.getElementById("cfgMyFedex").addEventListener("change", e=>{
+    CONFIG.myFedexCountry = e.target.value.trim().toUpperCase(); saveConfig(CONFIG); toast("MY → FedEx country updated");
+  });
+  document.getElementById("cfgUsFedex").addEventListener("change", e=>{
+    CONFIG.usFedexCountry = e.target.value.trim().toUpperCase(); saveConfig(CONFIG); toast("US → FedEx country updated");
+  });
+  renderCountryList("cfgListManualFedex", "manualFedex");
+  renderCountryList("cfgListManualDhl", "manualDhl");
+  renderCountryList("cfgListSuspended", "suspended");
   document.getElementById("cfgSku").innerHTML = Object.entries(CONFIG.skuToSfItemName).map(([sku,name])=>
     `<div style="${KV}"><code style="background:var(--bg-section);padding:1px 6px;border-radius:4px;font-size:11.5px;">${sku}</code>→ ${name}</div>`).join("");
   document.getElementById("cfgDecisions").innerHTML = `
@@ -1056,13 +1133,15 @@ function renderConfig(){
         "Job order Tax ID: extracted from a Shopify Note Attributes line whose key contains \"tax\" — no dedicated Shopify export column exists for this, confirm the real attribute name if it's not being picked up",
         "Job order phone/zip: prefixed with ' when they start with 0, so pasting into Google Sheets doesn't drop the leading zero",
         "MY/US/Intl-FedEx exports now use the real decrypted templates (field-for-field, one row per kit)",
-        "Manual fulfillment workbook has 4 tabs: FedEx Outbound (ID/JP/PH share one template), FedEx Outbound (IN, a different template), FedEx Return (ID/JP/IN share one template with per-country Purpose/Return Reason), and DHL. PH has no automated return — generated manually via the UPS website.",
+        "Manual fulfillment workbook has 5 tabs: FedEx Outbound (ID/JP/PH — also the catch-all for MY/US/other-Intl no-inventory orders), FedEx Outbound (IN, a different template), FedEx Return (ID/JP/IN share one template with per-country Purpose/Return Reason), DHL, and SF (no inventory). PH has no automated return — generated manually via the UPS website.",
         "DHL orders don't get the FedEx 4-kit shipment split — every kit of a DHL order shares one shipment reference",
         "FedEx split: fill to 4 kits/shipment, rebalance the last two shipments to avoid a 1-kit remainder",
         "D365 \"move out of queue\" = action list only in v1, no automatic D365 writes",
         "Issues workbook tabs are named to match the live On Hold Order Google Sheet exactly, for direct copy-paste: \"Shopify on hold orders\" (40-col shipment layout + Route/Reason columns appended) and \"Expired orders in Shopify\" (exact replica of the raw Shopify export row(s), not a re-derived summary)",
-        "Products with no FedEx/SF inventory (currently Vital V2, PRE-FG-000107) keep their normal country-based route for classification, but are excluded from the automated SF/MY/US/Intl-FedEx files and instead appear in a matching \"(no inventory)\" tab inside the Manual fulfillment workbook — holds still take priority, so a held Vital V2 order only redirects once released",
-        "Shopify/FedEx product display names are per-SKU (CONFIG.skuToSfItemName / skuToShipmentReference) — add new products there rather than assuming \"Circle Exome Premium\""
+        "Shopify/FedEx product display names are per-SKU (CONFIG.skuToSfItemName / skuToShipmentReference) — add new products there rather than assuming \"Circle Exome Premium\"",
+        "FedEx-family exports re-split Recipient Address Line 1/2 to fit FedEx's 35-char-per-line limit, cutting only on comma boundaries (never mid-word); if it still can't fit in 2 lines, the order is held for review instead of silently truncating",
+        "Any SKU other than what's listed in \"SKU → SF item name mapping\" above is held as an unrecognized product — add it there (and to skuToShipmentReference) once confirmed rather than assuming it's Premium",
+        "No-inventory products (Vital V2) always land in the Manual fulfillment workbook: HK → the SF-format tab there; IN and DHL-list countries → their existing manual tabs (already product-agnostic); everything else (ID/JP/PH/MY/US/other Intl) → the \"FedEx Outbound (ID-JP-PH)\" tab, using its profile as a generic default for countries it doesn't have one for"
       ].map(li=>`<li style="padding:3px 0;font-size:12.5px;color:var(--fg1);font-family:var(--font-sans);">${li}</li>`).join("")}
     </ul>`;
 }
