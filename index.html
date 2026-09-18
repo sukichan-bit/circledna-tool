@@ -785,11 +785,25 @@ function buildShopifyOnHoldExport(records){
 function buildExpiredOrdersShopifyExport(records){
   const rows = [SHOPIFY_RAW_HEADER || []];
   const seen = new Set();
+  const isPaymentIssue = so => so && (so.financialStatus === "pending" || so.financialStatus === "expired" || so.cancelledAt);
   for(const rec of records.filter(r=>r.status==="HOLD" && effStatus(r)==="HOLD")){
     const so = rec.shopify;
-    if(so && (so.financialStatus === "pending" || so.financialStatus === "expired" || so.cancelledAt) && !seen.has(so.name)){
+    if(isPaymentIssue(so) && !seen.has(so.name)){
       seen.add(so.name);
       rows.push(...so.rawRows);
+    }
+  }
+  // Orders D365 was never told about at all (e.g. abandoned before sync)
+  // still need daily monitoring here — records[] only covers D365 rows, so
+  // this tab would otherwise never see them even though it's meant to be a
+  // Shopify-side payment-status check, independent of D365.
+  if(STATE.shopifyOrders){
+    for(const so of Object.values(STATE.shopifyOrders)){
+      if(seen.has(so.name)) continue;
+      if(isPaymentIssue(so)){
+        seen.add(so.name);
+        rows.push(...so.rawRows);
+      }
     }
   }
   return rows;
@@ -1105,6 +1119,7 @@ document.getElementById("btnProcess").addEventListener("click", ()=>{
   document.getElementById("dateLabel").textContent = "Processing date: "+date;
   STATE.records = buildRecords(uploaded.d365, uploaded.shopify, CONFIG);
   STATE.records.sort((a,b) => orderNumForSort(a.d365.shopifyRef) - orderNumForSort(b.d365.shopifyRef));
+  STATE.shopifyOrders = uploaded.shopify;
   STATE.processed = true;
   refreshAll();
   switchTab("review");
@@ -1337,6 +1352,7 @@ function renderConfig(){
       <li>D365 "move out of queue" = action list only in v1, no automatic D365 writes</li>
       <li>Shopify/FedEx product display names are per-SKU (CONFIG.skuToSfItemName / skuToShipmentReference) — add new products there rather than assuming "Circle Exome Premium"</li>
       <li>Issues workbook tabs are named to match the live On Hold Order Google Sheet exactly, for direct copy-paste: "Shopify on hold orders" (40-col shipment layout + Route/Reason columns appended) and "Expired orders in Shopify" (exact replica of the raw Shopify export row(s), not a re-derived summary)</li>
+      <li>"Expired orders in Shopify" also includes Shopify orders that never made it into D365 at all (not just held D365-matched ones) — everything else in this tool only ever looks at D365 rows, so this is the one place a Shopify-only pending/expired/cancelled order gets surfaced</li>
       <li>FedEx-family exports re-split Recipient Address Line 1/2 to fit FedEx's 35-char-per-line limit, cutting only on comma boundaries (never mid-word); if it still can't fit in 2 lines, the order is held for review instead of silently truncating</li>
       <li>Held orders bound for any FedEx-family route can have Address Line 1/2 hand-edited right on the Resolve tab (pre-filled with the auto-split) — release uses your typed values instead of the auto-split for every export from then on</li>
       <li>Any SKU other than what's listed in "SKU → SF item name mapping" above is held as an unrecognized product — add it there (and to skuToShipmentReference) once confirmed rather than assuming it's Premium</li>
