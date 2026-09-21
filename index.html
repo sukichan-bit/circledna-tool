@@ -542,23 +542,26 @@ function extractTaxId(so){
   }
   return "";
 }
-// FedEx-family templates cap Recipient Address Line 1/2 at 35 chars each.
-// Combine Shopify's own addr1/addr2 into one address, then re-split on
-// comma boundaries (never breaking a word/segment across the 35-char cut)
-// so line 1 is packed as full as possible and the rest spills into line 2.
+// FedEx-family templates cap Recipient Address Line 1 at 35 chars; Line 2
+// has no limit. Combine Shopify's own addr1/addr2 into one address, then
+// re-split on comma boundaries (never breaking a word/segment mid-cut) so
+// Line 1 is packed as full as possible and everything else spills into
+// Line 2, however long that ends up being.
 const FEDEX_ADDR_LINE_LIMIT = 35;
 function splitAddressForFedex(addr1, addr2){
   const full = [addr1, addr2].map(s=>(s||"").trim()).filter(Boolean).join(", ");
   const segments = full.split(",").map(s=>s.trim()).filter(Boolean);
-  const lines = [""];
-  for(const seg of segments){
-    const cur = lines[lines.length-1];
-    const candidate = cur ? `${cur}, ${seg}` : seg;
-    if(candidate.length <= FEDEX_ADDR_LINE_LIMIT) lines[lines.length-1] = candidate;
-    else lines.push(seg);
+  // Line 1 is hard-capped at 35 chars; line 2 has no limit — whatever
+  // doesn't fit in line 1 spills into line 2 in full, however long.
+  let line1 = "", splitAt = 0;
+  for(let i=0;i<segments.length;i++){
+    const candidate = line1 ? `${line1}, ${segments[i]}` : segments[i];
+    if(candidate.length > FEDEX_ADDR_LINE_LIMIT) break;
+    line1 = candidate;
+    splitAt = i+1;
   }
-  const line1 = lines[0]||"", line2 = lines.slice(1).join(", ");
-  return { line1, line2, overflow: lines.length > 2 || line2.length > FEDEX_ADDR_LINE_LIMIT };
+  const line2 = segments.slice(splitAt).join(", ");
+  return { line1, line2, overflow: false };
 }
 
 /* ======================================================================
@@ -641,14 +644,11 @@ function buildRecords(d365Rows, shopifyOrders, cfg){
         const saudi = detectSaudiShortAddressIssue(fields);
         if(!saudi.ok){ rec.status = "HOLD"; rec.issues.push(saudi.reason); }
       }
-      // FedEx-family exports (everything except HK-SF) need Address Line 1/2
-      // re-split to fit FedEx's 35-char-per-line limit without breaking a
-      // comma-separated segment across the boundary.
+      // FedEx-family exports (everything except HK-SF) need Address Line 1
+      // re-split to fit FedEx's 35-char limit without breaking a
+      // comma-separated segment across the boundary; Line 2 has no limit,
+      // so this always fits — nothing to hold for here.
       rec.fedexAddr = splitAddressForFedex(so.shipAddr1, so.shipAddr2);
-      if(rec.route !== "HK-SF" && rec.fedexAddr.overflow){
-        rec.status = "HOLD";
-        rec.issues.push(`Address exceeds FedEx's 35-char-per-line limit even after splitting on commas: "${[so.shipAddr1, so.shipAddr2].filter(Boolean).join(", ")}"`);
-      }
     }
 
     if(rec.status !== "HOLD") rec.status = "READY";
@@ -1207,7 +1207,7 @@ function renderResolve(){
       <ul class="issue-list">${r.issues.map(i=>`<li>⚠ ${i}</li>`).join("")}</ul>
       ${showAddrEdit ? `
       <div class="kv"><span class="muted">Address Line 1</span><input type="text" maxlength="35" placeholder="Max 35 characters" data-addr1="${i}" value="${eff.line1.replace(/"/g,'&quot;')}"></div>
-      <div class="kv"><span class="muted">Address Line 2</span><input type="text" maxlength="35" placeholder="Max 35 characters" data-addr2="${i}" value="${eff.line2.replace(/"/g,'&quot;')}"></div>
+      <div class="kv"><span class="muted">Address Line 2</span><input type="text" placeholder="No character limit" data-addr2="${i}" value="${eff.line2.replace(/"/g,'&quot;')}"></div>
       ` : ""}
       <textarea rows="2" placeholder="Why this is OK to release (e.g. Chinese characters are fine for HK-SF; apostrophe in address is normal punctuation)" data-note="${i}">${r.override.note||""}</textarea>
       <div class="flexend" style="margin-top:8px;">
@@ -1353,7 +1353,7 @@ function renderConfig(){
       <li>Shopify/FedEx product display names are per-SKU (CONFIG.skuToSfItemName / skuToShipmentReference) — add new products there rather than assuming "Circle Exome Premium"</li>
       <li>Issues workbook tabs are named to match the live On Hold Order Google Sheet exactly, for direct copy-paste: "Shopify on hold orders" (40-col shipment layout + Route/Reason columns appended) and "Expired orders in Shopify" (exact replica of the raw Shopify export row(s), not a re-derived summary)</li>
       <li>"Expired orders in Shopify" also includes Shopify orders that never made it into D365 at all (not just held D365-matched ones) — everything else in this tool only ever looks at D365 rows, so this is the one place a Shopify-only pending/expired/cancelled order gets surfaced</li>
-      <li>FedEx-family exports re-split Recipient Address Line 1/2 to fit FedEx's 35-char-per-line limit, cutting only on comma boundaries (never mid-word); if it still can't fit in 2 lines, the order is held for review instead of silently truncating</li>
+      <li>FedEx-family exports re-split Recipient Address Line 1/2: Line 1 is hard-capped at 35 chars (cutting only on comma boundaries, never mid-word), Line 2 has no limit and takes everything that doesn't fit in Line 1</li>
       <li>Held orders bound for any FedEx-family route can have Address Line 1/2 hand-edited right on the Resolve tab (pre-filled with the auto-split) — release uses your typed values instead of the auto-split for every export from then on</li>
       <li>Any SKU other than what's listed in "SKU → SF item name mapping" above is held as an unrecognized product — add it there (and to skuToShipmentReference) once confirmed rather than assuming it's Premium</li>
       <li>No-inventory products (Vital V2) always land in the Manual fulfillment workbook: HK → the SF-format tab there; IN and DHL-list countries → their existing manual tabs (already product-agnostic); everything else (ID/JP/PH/MY/US/other Intl) → the "FedEx Outbound (ID-JP-PH)" tab, using its profile as a generic default for countries it doesn't have one for</li>
