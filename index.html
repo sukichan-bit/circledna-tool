@@ -406,8 +406,7 @@ function d365WorkbookToRows(workbook){
     deliverRemainder: r["Deliver remainder"] !== undefined ? Number(r["Deliver remainder"]) :
                        (r["CW deliver remainder"] !== undefined ? Number(r["CW deliver remainder"]) : Number(r["Quantity"]||0)),
     customerName: r["Shopify customer name"] || r["Recipient Contact Name"] || "",
-    customerEmail: r["Shopify customer email"] || r["Recipient Email Address"] || "",
-    customerPhone: r["Shopify customer phone"] || r["Recipient Tel No."] || ""
+    customerEmail: r["Shopify customer email"] || r["Recipient Email Address"] || ""
   }));
 }
 
@@ -494,18 +493,13 @@ function textSafe(value){
 function looksLikeScientificNotation(raw){
   return /^\d(\.\d+)?e\+\d+$/i.test(String(raw||"").trim());
 }
-// Contact number prefers D365's "Shopify customer phone" column (stored as
-// text, usually with a leading "+", so it survives an Excel round-trip
-// intact) and falls back to Shopify's own Shipping Phone when D365's copy
-// is blank or itself unusable — some orders simply have no phone in the
-// D365 export. Every other field (name, address, email, etc.) always
-// comes from Shopify regardless.
-function bestRawPhone(d, so){
-  const d365Phone = d && d.customerPhone;
-  if(d365Phone && !looksLikeScientificNotation(d365Phone)) return d365Phone;
-  const shopifyPhone = so && so.shipPhone;
-  if(shopifyPhone) return shopifyPhone;
-  return d365Phone || "";
+// Contact number is sourced from Shopify's own Shipping Phone — same as
+// every other order field (name, address, email, etc.), D365 is not
+// consulted for phone at all. `looksLikeScientificNotation` is still used
+// downstream to hold an order rather than dispatch a number that's been
+// mangled this way — see the note where rec.phone is set in buildRecords.
+function shopifyPhoneOf(so){
+  return (so && so.shipPhone) || "";
 }
 // Used for every FedEx-family export (Intl/MY/US, Manual-FedEx, Manual-DHL,
 // Shopify on-hold) — keeps the destination country's calling code but
@@ -616,15 +610,13 @@ function buildRecords(d365Rows, shopifyOrders, cfg){
         const saudi = detectSaudiShortAddressIssue(fields);
         if(!saudi.ok){ rec.status = "HOLD"; rec.issues.push(saudi.reason); }
       }
-      // Contact number prefers D365's "Shopify customer phone" column,
-      // falling back to Shopify's Shipping Phone when D365's is blank or
-      // itself unusable. Whichever source is used, if the resolved value
-      // is still in scientific notation (e.g. "9.71545E+11" — a common
-      // casualty of Excel mangling long all-digit values, and NOT a mere
-      // column-width display issue: the extra digits are already gone
-      // from the file's own bytes, confirmed by inspecting them directly)
-      // hold the order rather than ship a garbled phone number.
-      rec.phone = bestRawPhone(d, so);
+      // Contact number is Shopify's Shipping Phone, same as every other
+      // field. If it's in scientific notation (e.g. "9.71545E+11" — a
+      // common casualty of Excel mangling long all-digit values, and NOT
+      // a mere column-width display issue: the extra digits are already
+      // gone from the file's own bytes, confirmed by inspecting them
+      // directly) hold the order rather than ship a garbled phone number.
+      rec.phone = shopifyPhoneOf(so);
       if(looksLikeScientificNotation(rec.phone)){
         rec.status = "HOLD";
         rec.issues.push(`Phone number corrupted in source file (spreadsheet scientific notation: "${rec.phone}") — original digits are unrecoverable, verify the customer's phone manually before dispatch`);
@@ -1201,7 +1193,7 @@ function renderConfig(){
         "Held orders can be manually released (Resolve tab) to include them in dispatch anyway — recorded with a note, kept separate from the original held status",
         "Job order Tax ID: extracted from a Shopify Note Attributes line whose key contains \"tax\" — no dedicated Shopify export column exists for this, confirm the real attribute name if it's not being picked up",
         "Job order phone/zip: prefixed with ' when they start with 0, so pasting into Google Sheets doesn't drop the leading zero",
-        "Recipient phone prefers D365's \"Shopify customer phone\" column (stored as text, survives Excel re-saves) and falls back to Shopify's own Shipping Phone when D365's is blank — every other field (name, address, email, etc.) always comes from Shopify. If the resolved number is still in spreadsheet scientific notation (e.g. \"9.71545E+11\") the order is held instead of shipping a garbled number — that's real data loss from an upstream Excel re-save, not a column-width display issue, so it can't be recovered by reading harder.",
+        "Recipient phone is sourced from Shopify's own Shipping Phone, same as every other order field — D365 is not consulted for phone. If the number is in spreadsheet scientific notation (e.g. \"9.71545E+11\") the order is held instead of shipping a garbled number — that's real data loss from an upstream Excel re-save, not a column-width display issue, so it can't be recovered by reading harder.",
         "MY/US/Intl-FedEx exports now use the real decrypted templates (field-for-field, one row per kit)",
         "Manual fulfillment workbook has 5 tabs: FedEx Outbound (ID/JP/PH — also the catch-all for MY/US/other-Intl no-inventory orders), FedEx Outbound (IN, a different template), FedEx Return (ID/JP/IN share one template with per-country Purpose/Return Reason), DHL, and SF (no inventory). PH has no automated return — generated manually via the UPS website.",
         "DHL orders don't get the FedEx 4-kit shipment split — every kit of a DHL order shares one shipment reference",
