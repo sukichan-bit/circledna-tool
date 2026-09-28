@@ -223,7 +223,7 @@ const DEFAULT_CONFIG = {
     SVN:"SI",EST:"EE",LVA:"LV",LTU:"LT",ISL:"IS",LUX:"LU",MLT:"MT"
   },
   manualFedex: ["ID","IN","JP","KR","PH"],
-  manualDhl: ["AE","AU","CA","CY","CZ","ES","GI","IL","JO","KW","MA","NZ","OM","PL","QA","SA"],
+  manualDhl: ["AE","AU","BH","CA","CY","CZ","ES","GI","IL","JO","KW","MA","NZ","OM","PL","QA","SA"],
   suspended: ["KR"],
   hkSfCountry: "HK",
   myFedexCountry: "MY",
@@ -496,8 +496,9 @@ function normalizePhoneForFedex(rawPhone, iso2){
   else if(p.startsWith("0")) p = p.slice(1);
   return `${code} ${p}`;
 }
-function shipmentReferenceForSku(sku){
-  return CONFIG.skuToShipmentReference[sku] || "Circle Exome Premium";
+function shipmentReferenceForSku(sku, country){
+  const base = CONFIG.skuToShipmentReference[sku] || "Circle Exome Premium";
+  return country === "JP" ? `${base}(JP)` : base;
 }
 function extractTaxId(so){
   if(!so || !so.noteAttributes) return "";
@@ -699,7 +700,7 @@ function buildShopifyOnHoldExport(records){
     const qty = Math.max(rec.kitQty||1, 1);
     for(let k=0;k<qty;k++){
       rows.push([
-        d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
+        d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
         so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
         textSafe(so?so.shipZip:""), so?normalizePhoneForFedex(so.shipPhone, rec.country):"", so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
@@ -779,7 +780,7 @@ function buildManualRows(records, route){
     const dhl = CONFIG.dhlReturnFields[rec.country] || {purpose:"",desc:""};
     for(let k=0;k<rec.kitQty;k++){
       rows.push([
-        d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
+        d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
         so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
         textSafe(so?so.shipZip:""), normalizePhoneForManual(so?so.shipPhone:""), so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
@@ -841,7 +842,7 @@ function buildManualFedexOutboundRows(records, countries, sheetProfile){
       const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
       for(let k=0;k<qty;k++){
         const base = [
-          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
+          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, p.hsCode, p.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
@@ -866,7 +867,7 @@ function buildManualFedexReturnRows(records){
       const txnId = shipments.length>1 ? shipmentRef(d.shopifyRef, sIdx) : d.shopifyRef;
       for(let k=0;k<qty;k++){
         rows.push([
-          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
+          txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           p.description, 39269090, "HK", 1, p.unitValue, "Pcs", p.commodityWeight, "KGS", "Prenetics Limited",
@@ -888,7 +889,7 @@ function fedexRows(records, route, header, includeMid, wantNoInventory){
       const txnId = shipmentRef(d.shopifyRef, sIdx);
       for(let k=0;k<qty;k++){
         const row = [
-          txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber),
+          txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
           textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
           rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
@@ -1175,6 +1176,7 @@ function renderConfig(){
         "Issues workbook tabs are named to match the live On Hold Order Google Sheet exactly, for direct copy-paste: \"Shopify on hold orders\" (40-col shipment layout + Route/Reason columns appended) and \"Expired orders in Shopify\" (exact replica of the raw Shopify export row(s), not a re-derived summary)",
         "\"Expired orders in Shopify\" also includes Shopify orders that never made it into D365 at all (not just held D365-matched ones) — everything else in this tool only ever looks at D365 rows, so this is the one place a Shopify-only pending/expired/cancelled order gets surfaced",
         "Shopify/FedEx product display names are per-SKU (CONFIG.skuToSfItemName / skuToShipmentReference) — add new products there rather than assuming \"Circle Exome Premium\"",
+        "Japan (JP) orders get \"(JP)\" appended to the FedEx Shipment Reference (e.g. \"Circle Exome Premium(JP)\") — Japan sells a special JP edition, so this is always applied regardless of SKU, on every FedEx-family export",
         "FedEx-family exports re-split Recipient Address Line 1/2: Line 1 is hard-capped at 35 chars (cutting only on comma boundaries, never mid-word), Line 2 has no limit and takes everything that doesn't fit in Line 1",
         "Held orders bound for any FedEx-family route can have Address Line 1/2 hand-edited right on the Resolve tab (pre-filled with the auto-split) — release uses your typed values instead of the auto-split for every export from then on",
         "Any SKU other than what's listed in \"SKU → SF item name mapping\" above is held as an unrecognized product — add it there (and to skuToShipmentReference) once confirmed rather than assuming it's Premium",
