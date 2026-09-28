@@ -485,10 +485,33 @@ function textSafe(value){
   const s = String(value==null?"":value).trim();
   return /^0\d/.test(s) ? "'"+s : s;
 }
-function normalizePhoneForFedex(rawPhone, iso2){
+// A phone value mangled into spreadsheet scientific notation (e.g.
+// "9.71545E+11") — happens whenever a raw export with all-digit phone
+// values gets opened/re-saved in Excel, which silently rounds the number
+// to ~6 significant digits for display and writes that back out as text.
+// Once a number is in this form the missing trailing digits are gone for
+// good — they can't be recovered from that file alone.
+function looksLikeScientificNotation(raw){
+  return /^\d(\.\d+)?e\+\d+$/i.test(String(raw||"").trim());
+}
+// D365's own "Shopify customer phone" column is stored as text (usually
+// with a leading "+"), so — unlike Shopify's own Shipping Phone column —
+// it survives an Excel round-trip intact. Prefer it; fall back to
+// Shopify's Shipping Phone only if D365 has none, or is itself mangled.
+function bestRawPhone(d, so){
+  const d365Phone = d && d.customerPhone;
+  if(d365Phone && !looksLikeScientificNotation(d365Phone)) return d365Phone;
+  const shopifyPhone = so && so.shipPhone;
+  if(shopifyPhone && !looksLikeScientificNotation(shopifyPhone)) return shopifyPhone;
+  return d365Phone || shopifyPhone || "";
+}
+// Used for every FedEx-family export (Intl/MY/US, Manual-FedEx, Manual-DHL,
+// Shopify on-hold) — keeps the destination country's calling code but
+// drops any "+" sign, e.g. "971 545934070", never "+971 545934070".
+function normalizePhone(rawPhone, iso2){
   const code = CONFIG.callingCodes[iso2];
   let p = String(rawPhone||"").replace(/[^\d+]/g,"");
-  if(!code) return p;
+  if(!code) return p.replace(/^\+/,"");
   if(p.startsWith("+")) p = p.slice(1);
   else if(p.startsWith("00")) p = p.slice(2);
   const alreadyHasCode = p.startsWith(code) && (code !== "1" || p.length === 11);
@@ -591,6 +614,17 @@ function buildRecords(d365Rows, shopifyOrders, cfg){
         const saudi = detectSaudiShortAddressIssue(fields);
         if(!saudi.ok){ rec.status = "HOLD"; rec.issues.push(saudi.reason); }
       }
+      // Prefer D365's "Shopify customer phone" over Shopify's own Shipping
+      // Phone — Shopify's export column is a common casualty of an Excel
+      // re-save mangling long all-digit values into scientific notation
+      // (e.g. "9.71545E+11"), while D365's copy is stored as text and
+      // survives. If BOTH sources are mangled the real number is gone for
+      // good, so hold the order rather than ship a garbled phone number.
+      rec.phone = bestRawPhone(d, so);
+      if(looksLikeScientificNotation(rec.phone)){
+        rec.status = "HOLD";
+        rec.issues.push(`Phone number corrupted in both source files (spreadsheet scientific notation: "${rec.phone}") — original digits are unrecoverable, verify the customer's phone manually before dispatch`);
+      }
       // FedEx-family exports (everything except HK-SF) need Address Line 1
       // re-split to fit FedEx's 35-char limit without breaking a
       // comma-separated segment across the boundary; Line 2 has no limit,
@@ -651,7 +685,7 @@ function buildSfExport(records, cfg, wantNoInventory){
   for(const rec of records.filter(r=>effStatus(r)==="READY" && r.route==="HK-SF" && !!r.noInventory === !!wantNoInventory)){
     const so = rec.shopify;
     const addr = sfAddress(so);
-    const phone = stripHkPrefix(so.shipPhone);
+    const phone = stripHkPrefix(rec.phone);
     for(const kit of expandKitRows(rec)){
       lineNum++;
       const itemName = cfg.skuToSfItemName[kit.sku] || kit.sku;
@@ -678,7 +712,7 @@ function buildJobOrderExport(records){
     rows.push([
       d.shopifyRef, d.salesOrder, d.itemNumber, d.productName, rec.kitQty, d.country, d.status, d.createdAt||"",
       "Free Shipping", so ? so.shipName : "", so ? so.shipAddr1 : "", so ? so.shipAddr2 : "", so ? so.shipCity : "",
-      rec.country||"", so ? textSafe(so.shipZip) : "", so ? textSafe(so.shipPhone) : "", so ? so.email : "", "",
+      rec.country||"", so ? textSafe(so.shipZip) : "", textSafe(rec.phone), so ? so.email : "", "",
       so ? extractTaxId(so) : ""
     ]);
   }
@@ -702,7 +736,7 @@ function buildShopifyOnHoldExport(records){
       rows.push([
         d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
         so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
-        textSafe(so?so.shipZip:""), so?normalizePhoneForFedex(so.shipPhone, rec.country):"", so?so.email:"",
+        textSafe(so?so.shipZip:""), rec.phone?normalizePhone(rec.phone, rec.country):"", so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
         rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", so?extractTaxId(so):"", "Y",
         so?so.discountCode:"", so?so.shippingMethod:"",
@@ -767,11 +801,6 @@ const FEDEX_HEADER_MY = FEDEX_HEADER_INTL.map(h => h==="Print of Commerical Invo
 const FEDEX_HEADER_US = [...FEDEX_HEADER_MY, "MID"];
 const MANUAL_BASE_HEADER = [...FEDEX_HEADER_MY, null, null, "Barcode"];
 const MANUAL_DHL_HEADER = [...MANUAL_BASE_HEADER, "Return purpose", "Return description"];
-function normalizePhoneForManual(rawPhone){
-  let p = String(rawPhone||"").replace(/[^\d]/g,"");
-  if(p.startsWith("0")) p = p.slice(1);
-  return p;
-}
 function buildManualRows(records, route){
   const rc = CONFIG.fedexRouteConfig["INTL-FEDEX"];
   const rows = [MANUAL_DHL_HEADER];
@@ -782,7 +811,7 @@ function buildManualRows(records, route){
       rows.push([
         d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
         so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
-        textSafe(so?so.shipZip:""), normalizePhoneForManual(so?so.shipPhone:""), so?so.email:"",
+        textSafe(so?so.shipZip:""), normalizePhone(rec.phone, rec.country), so?so.email:"",
         rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
         rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y",
         "", "", "",
@@ -844,7 +873,7 @@ function buildManualFedexOutboundRows(records, countries, sheetProfile){
         const base = [
           txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
-          textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
+          textSafe(so?so.shipZip:""), normalizePhone(rec.phone, rec.country), so?so.email:"",
           p.description, p.hsCode, p.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
           p.purposeOfShipment, p.returnReason, "N"
         ];
@@ -869,7 +898,7 @@ function buildManualFedexReturnRows(records){
         rows.push([
           txnId, p.senderCode, "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country,
-          textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
+          textSafe(so?so.shipZip:""), normalizePhone(rec.phone, rec.country), so?so.email:"",
           p.description, 39269090, "HK", 1, p.unitValue, "Pcs", p.commodityWeight, "KGS", "Prenetics Limited",
           "Y", "6", "Y", "661486660", p.purposeOfShipment, p.returnReason, "4", p.commodityWeight, "KGS", "N",
           "0", "NO EEI 30.37(a)", "", "", ""
@@ -891,7 +920,7 @@ function fedexRows(records, route, header, includeMid, wantNoInventory){
         const row = [
           txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
-          textSafe(so?so.shipZip:""), normalizePhoneForFedex(so?so.shipPhone:"", rec.country), so?so.email:"",
+          textSafe(so?so.shipZip:""), normalizePhone(rec.phone, rec.country), so?so.email:"",
           rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
           rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y"
         ];
@@ -1168,6 +1197,7 @@ function renderConfig(){
         "Held orders can be manually released (Resolve tab) to include them in dispatch anyway — recorded with a note, kept separate from the original held status",
         "Job order Tax ID: extracted from a Shopify Note Attributes line whose key contains \"tax\" — no dedicated Shopify export column exists for this, confirm the real attribute name if it's not being picked up",
         "Job order phone/zip: prefixed with ' when they start with 0, so pasting into Google Sheets doesn't drop the leading zero",
+        "Recipient phone is taken from D365's \"Shopify customer phone\" column first (it's stored as text and survives an Excel re-save), falling back to Shopify's own Shipping Phone only if D365 has none — Shopify's column is a common casualty of Excel mangling long digit strings into scientific notation (e.g. \"9.71545E+11\"). If BOTH sources are mangled the order is held instead of shipping a garbled number. Every FedEx-family export (Intl/MY/US, Manual-FedEx, Manual-DHL) keeps the destination's calling code with no \"+\" sign, e.g. \"971 545934070\".",
         "MY/US/Intl-FedEx exports now use the real decrypted templates (field-for-field, one row per kit)",
         "Manual fulfillment workbook has 5 tabs: FedEx Outbound (ID/JP/PH — also the catch-all for MY/US/other-Intl no-inventory orders), FedEx Outbound (IN, a different template), FedEx Return (ID/JP/IN share one template with per-country Purpose/Return Reason), DHL, and SF (no inventory). PH has no automated return — generated manually via the UPS website.",
         "DHL orders don't get the FedEx 4-kit shipment split — every kit of a DHL order shares one shipment reference",
