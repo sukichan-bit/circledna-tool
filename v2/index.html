@@ -1130,11 +1130,6 @@ function renderReviewTable(){
 const D365F_LEGAL_ENTITY = "H001";
 const D365F_WAREHOUSE = "OPS-WH07";
 const D365F_WAREHOUSE_LOCATION = "Prenetics~OPS-WH07~Primary";
-// Carried verbatim from the real D365 import template (THK_SalesShopify-
-// FullfilmentExcelTemplate (Fedex).xlsx) — purpose undetermined, not
-// treated as a universal rule, just preserved as-is per instruction.
-const D365F_TEMPLATE_O1 = "PRE-SER-000068";
-const D365F_TEMPLATE_P1 = "Prenetics~~";
 
 function d365fLoadDefaultBatches(){
   try{ return JSON.parse(localStorage.getItem("circledna_d365f_default_batches")||"{}"); }
@@ -1447,7 +1442,6 @@ function d365fBuildWorkbook(records){
     const rn = i+1;
     if(wsSerial[`C${rn}`]) wsSerial[`C${rn}`].z = "0";
   }
-  XLSX.utils.sheet_add_aoa(wsOrder, [[D365F_TEMPLATE_O1, D365F_TEMPLATE_P1]], {origin:"O1"});
   XLSX.utils.book_append_sheet(wb, wsOrder, "order");
   XLSX.utils.book_append_sheet(wb, wsSerial, "serial number");
   const wbout = XLSX.write(wb, {bookType:"xlsx", type:"array"});
