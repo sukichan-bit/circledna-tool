@@ -186,14 +186,32 @@
     <section id="tab-d365fulfill" style="display:none">
       <div style="background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);">
         <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Generate D365 Fulfillment File</h2>
-        <div style="color:var(--fg2);font-size:13px;margin-bottom:4px;">Converts the FedEx daily shipment report into a D365 import workbook (tracking, serials, batch) for orders shipped from <strong>H001 / OPS-WH07</strong>. This is staging-only — nothing here touches the main Upload → Review → Resolve → Export pipeline.</div>
+        <div style="color:var(--fg2);font-size:13px;margin-bottom:4px;">Converts a carrier's daily shipment report(s) into a D365 import workbook (tracking, serials, batch). This is staging-only — nothing here touches the main Upload → Review → Resolve → Export pipeline.</div>
         <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">Generating a file never marks an order fulfilled, picked, or packed in D365 — that still happens when you actually import it.</div>
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <button id="btnCarrierFedex" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:8px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">FedEx (H001/OPS-WH07)</button>
+          <button id="btnCarrierSf" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:8px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">SF Express (H001/OPS-WH06)</button>
+        </div>
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
-          <div style="flex:1;min-width:240px;">
+          <div id="wrap-fxreport" style="flex:1;min-width:240px;">
             <div id="dz-fxreport" style="border:2px dashed var(--border-strong);border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:var(--bg-section);">
               <input type="file" id="file-fxreport" accept=".xlsx,.xls" style="display:none;">
               <div style="font-family:var(--font-sans);font-size:13.5px;font-weight:600;color:var(--fg-heading);">FedEx Daily Report (.xlsx)</div>
               <div id="fname-fxreport" style="margin-top:6px;font-size:12.5px;color:var(--fg2);">Click or drop file</div>
+            </div>
+          </div>
+          <div id="wrap-sfoutbound" style="display:none;flex:1;min-width:240px;">
+            <div id="dz-sfoutbound" style="border:2px dashed var(--border-strong);border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:var(--bg-section);">
+              <input type="file" id="file-sfoutbound" accept=".xls,.xlsx" style="display:none;">
+              <div style="font-family:var(--font-sans);font-size:13.5px;font-weight:600;color:var(--fg-heading);">SF Outbound report (.xls)</div>
+              <div id="fname-sfoutbound" style="margin-top:6px;font-size:12.5px;color:var(--fg2);">Click or drop file</div>
+            </div>
+          </div>
+          <div id="wrap-sfsn" style="display:none;flex:1;min-width:240px;">
+            <div id="dz-sfsn" style="border:2px dashed var(--border-strong);border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:var(--bg-section);">
+              <input type="file" id="file-sfsn" accept=".xls,.xlsx" style="display:none;">
+              <div style="font-family:var(--font-sans);font-size:13.5px;font-weight:600;color:var(--fg-heading);">SF Outbound SN report (.xls)</div>
+              <div id="fname-sfsn" style="margin-top:6px;font-size:12.5px;color:var(--fg2);">Click or drop file</div>
             </div>
           </div>
           <div style="flex:1;min-width:240px;">
@@ -1122,20 +1140,32 @@ function renderReviewTable(){
 
 /* ======================================================================
    D365 FULFILLMENT FILE GENERATOR (staging/beta — v2 only)
-   Converts the FedEx daily shipment report + the existing morning Job
-   Order export into a D365 import workbook (tracking/serial/batch) for
-   orders shipped from H001 / OPS-WH07. Entirely separate state from
-   STATE/CONFIG above so it can't interfere with the daily pipeline.
+   Converts a carrier's daily shipment report(s) + the existing morning
+   Job Order export into a D365 import workbook (tracking/serial/batch).
+   Two carriers share this one pipeline (Job Order matching, on-hand
+   allocation, preview/validation, template export, history) but keep
+   their own warehouse/location/default-batch/parsing/tracking rules —
+   see D365F_CARRIER_CONFIG. Entirely separate state from STATE/CONFIG
+   above so it can't interfere with the daily pipeline.
    ====================================================================== */
-const D365F_LEGAL_ENTITY = "H001";
-const D365F_WAREHOUSE = "OPS-WH07";
-const D365F_WAREHOUSE_LOCATION = "Prenetics~OPS-WH07~Primary";
+const D365F_CARRIER_CONFIG = {
+  fedex: { label:"FedEx", legalEntity:"H001", warehouse:"OPS-WH07", warehouseLocation:"Prenetics~OPS-WH07~Primary", defaultBatchForPremium:"fedex" },
+  sf:    { label:"SF Express", legalEntity:"H001", warehouse:"OPS-WH06", warehouseLocation:"Prenetics~OPS-WH06~Primary", defaultBatchForPremium:"OP001" }
+};
+function d365fCfg(){ return D365F_CARRIER_CONFIG[D365F.carrier]; }
 
 function d365fLoadDefaultBatches(){
-  try{ return JSON.parse(localStorage.getItem("circledna_d365f_default_batches")||"{}"); }
-  catch(e){ return {}; }
+  try{
+    const raw = JSON.parse(localStorage.getItem("circledna_d365f_default_batches")||"{}");
+    return { fedex: raw.fedex||{}, sf: raw.sf||{} };
+  }catch(e){ return { fedex:{}, sf:{} }; }
 }
 function d365fSaveDefaultBatches(m){ localStorage.setItem("circledna_d365f_default_batches", JSON.stringify(m)); }
+function d365fLoadConfirmedAliases(){
+  try{ return JSON.parse(localStorage.getItem("circledna_d365f_confirmed_aliases")||"{}"); }
+  catch(e){ return {}; }
+}
+function d365fSaveConfirmedAliases(m){ localStorage.setItem("circledna_d365f_confirmed_aliases", JSON.stringify(m)); }
 function d365fGetHistory(){
   try{ return JSON.parse(localStorage.getItem("circledna_d365f_history")||"[]"); }
   catch(e){ return []; }
@@ -1143,16 +1173,20 @@ function d365fGetHistory(){
 function d365fSaveHistory(h){ localStorage.setItem("circledna_d365f_history", JSON.stringify(h)); }
 
 let D365F = {
-  fedexKits: [], fedexIssues: [],
+  carrier: "fedex",
+  kits: [], parseIssues: [],
+  sfOutboundRows: null, sfSnRows: null,
   jobOrderIndex: null, jobOrderNeedsMapping: null,
   onHand: null,
   matched: [],
   defaultBatches: d365fLoadDefaultBatches(),
+  confirmedAliases: d365fLoadConfirmedAliases(),
   history: [],
   runSeq: 0
 };
 D365F.history = d365fGetHistory();
-if(!D365F.defaultBatches["PRE-FG-000021"]) D365F.defaultBatches["PRE-FG-000021"] = "fedex";
+if(!D365F.defaultBatches.fedex["PRE-FG-000021"]) D365F.defaultBatches.fedex["PRE-FG-000021"] = "fedex";
+if(!D365F.defaultBatches.sf["PRE-FG-000021"]) D365F.defaultBatches.sf["PRE-FG-000021"] = "OP001";
 
 // Cheap non-cryptographic hash (FNV-1a) — good enough to notice "this is
 // the same file as a previous run," not a security control.
@@ -1304,6 +1338,198 @@ function d365fParseJobOrder(workbook){
   }
   return { index, needsMapping: null };
 }
+// Resolves a raw order reference to Job Order candidates. SF's ERP reference
+// sometimes carries a "-re" suffix (e.g. "DNA-15656-re") that may or may not
+// denote the same underlying order as the base Shopify reference — never
+// strip it silently. Exact match first; then a previously-confirmed alias
+// (persisted so the operator isn't asked twice for a recurring pattern);
+// then, only as an unconfirmed suggestion the UI must surface for review.
+function d365fLookupJobOrder(rawRef, jobOrderIndex){
+  if(!jobOrderIndex) return { candidates: null, resolvedRef: null, method: "no-job-order-file" };
+  if(jobOrderIndex.has(rawRef)) return { candidates: jobOrderIndex.get(rawRef), resolvedRef: rawRef, method: "exact" };
+  const confirmed = D365F.confirmedAliases[rawRef];
+  if(confirmed && jobOrderIndex.has(confirmed)) return { candidates: jobOrderIndex.get(confirmed), resolvedRef: confirmed, method: "confirmed-alias" };
+  const m = rawRef.match(/^(.*)-re$/i);
+  if(m && jobOrderIndex.has(m[1])) return { candidates: null, resolvedRef: m[1], method: "alias-candidate-unconfirmed" };
+  return { candidates: null, resolvedRef: null, method: "none" };
+}
+
+/* ---- SF Express Outbound + Outbound SN report parsing (genuine legacy
+   .xls — XLSX.read via SheetJS handles BIFF8 natively, no conversion
+   needed) ---- */
+function d365fSfEligibility(statusText, cancelFlag){
+  const status = String(statusText||"").trim();
+  const cancelled = /^(y|yes|是|true|1)$/i.test(String(cancelFlag||"").trim());
+  if(cancelled) return { eligible:false, reason:`Order cancelled (订单取消标记="${cancelFlag}")` };
+  if(/完成/.test(status)) return { eligible:true, reason:null };
+  if(!status) return { eligible:false, reason:`Blank order status (订单状态) — cannot confirm this was shipped` };
+  return { eligible:false, reason:`Unrecognized order status "${status}" — not assumed shipped, needs manual review` };
+}
+// SF's own 发运时间 column is "YYYY-MM-DD HH:MM[:SS]" (or a real Excel date
+// cell) — a different format from FedEx's DD/MM/YY text.
+function d365fParseSfDate(raw){
+  if(raw instanceof Date && !isNaN(raw)) return raw;
+  const s = String(raw||"").trim();
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  if(mo<1||mo>12||d<1||d>31) return null;
+  const dt = new Date(y, mo-1, d);
+  if(dt.getMonth()!==mo-1 || dt.getDate()!==d) return null;
+  return dt;
+}
+function d365fNormalizeSfAwb(raw){
+  const s = String(raw||"").trim();
+  return s ? s : null; // preserved verbatim, "SF" prefix and all — no digit-count rule for SF
+}
+function d365fParseSfOutbound(workbook){
+  const issues = [];
+  const sheetName = workbook.SheetNames[0];
+  const aoa = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {header:1, defval:""});
+  const required = ["wms单号","出库单号","erp单号","运单号","订单状态","订单取消标记","发运时间","行号","sku","发货数"];
+  const headerRowIdx = d365fFindHeaderRow(aoa, required);
+  if(headerRowIdx < 0){
+    issues.push(`Could not find the expected header row (${required.join(", ")}) in the Outbound report.`);
+    return { rows: [], issues };
+  }
+  const header = aoa[headerRowIdx];
+  const col = {
+    wms: d365fColIndex(header, ["wms单号"]), outbound: d365fColIndex(header, ["出库单号"]), erp: d365fColIndex(header, ["erp单号"]),
+    awb: d365fColIndex(header, ["运单号"]), status: d365fColIndex(header, ["订单状态"]), cancel: d365fColIndex(header, ["订单取消标记"]),
+    returnWaybill: d365fColIndex(header, ["签回单号"]), shipDate: d365fColIndex(header, ["发运时间"]), lineNo: d365fColIndex(header, ["行号"]),
+    sku: d365fColIndex(header, ["sku"]), productName: d365fColIndex(header, ["产品名称"]), shippedQty: d365fColIndex(header, ["发货数"])
+  };
+  const rows = [];
+  for(let r=headerRowIdx+1; r<aoa.length; r++){
+    const row = aoa[r]||[];
+    const outboundOrderId = String(row[col.outbound]||"").trim();
+    const erpRef = String(row[col.erp]||"").trim();
+    if(!outboundOrderId && !erpRef) continue; // blank row
+    const rowIssues = [];
+    const awb = d365fNormalizeSfAwb(row[col.awb]);
+    if(!awb) rowIssues.push("Missing Outbound AWB (运单号)");
+    const { eligible, reason } = d365fSfEligibility(row[col.status], row[col.cancel]);
+    if(!eligible) rowIssues.push(reason);
+    const shippedQty = Number(row[col.shippedQty]||0);
+    const shippingDate = d365fParseSfDate(row[col.shipDate]);
+    if(!shippingDate) rowIssues.push(`Could not parse shipment date "${row[col.shipDate]}" (发运时间)`);
+    rows.push({
+      sourceSheet: sheetName, sourceRow: r+1,
+      wmsOrderId: String(row[col.wms]||"").trim(), outboundOrderId, erpRef, awb,
+      returnWaybill: col.returnWaybill>=0 ? (String(row[col.returnWaybill]||"").trim()||null) : null,
+      eligible, eligibilityReason: reason,
+      shippingDate, shippingDateText: shippingDate ? d365fFormatDateForD365(shippingDate) : null,
+      lineNo: String(row[col.lineNo]||"").trim(),
+      sku: String(row[col.sku]||"").trim(), productDescription: String(row[col.productName]||"").trim(),
+      shippedQty, issues: rowIssues
+    });
+  }
+  return { rows, issues };
+}
+function d365fParseSfSn(workbook){
+  const issues = [];
+  const sheetName = workbook.SheetNames[0];
+  const aoa = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {header:1, defval:""});
+  const required = ["wms单号","出库单号","erp单号","运单号","订单状态","sku","序列号"];
+  const headerRowIdx = d365fFindHeaderRow(aoa, required);
+  if(headerRowIdx < 0){
+    issues.push(`Could not find the expected header row (${required.join(", ")}) in the Outbound SN report.`);
+    return { rows: [], issues };
+  }
+  const header = aoa[headerRowIdx];
+  const col = {
+    wms: d365fColIndex(header, ["wms单号"]), outbound: d365fColIndex(header, ["出库单号"]), erp: d365fColIndex(header, ["erp单号"]),
+    awb: d365fColIndex(header, ["运单号"]), status: d365fColIndex(header, ["订单状态"]),
+    sku: d365fColIndex(header, ["sku"]), productName: d365fColIndex(header, ["产品名称"]), serial: d365fColIndex(header, ["序列号"])
+  };
+  const rows = [];
+  for(let r=headerRowIdx+1; r<aoa.length; r++){
+    const row = aoa[r]||[];
+    const outboundOrderId = String(row[col.outbound]||"").trim();
+    const serial = String(row[col.serial]||"").trim();
+    if(!outboundOrderId && !serial) continue;
+    rows.push({
+      sourceSheet: sheetName, sourceRow: r+1,
+      wmsOrderId: String(row[col.wms]||"").trim(), outboundOrderId, erpRef: String(row[col.erp]||"").trim(),
+      awb: d365fNormalizeSfAwb(row[col.awb]), statusText: String(row[col.status]||"").trim(),
+      sku: String(row[col.sku]||"").trim(), productDescription: String(row[col.productName]||"").trim(),
+      serial
+    });
+  }
+  return { rows, issues };
+}
+function d365fSfGroupKey(outboundOrderId, awb, sku){ return `${outboundOrderId}|${awb}|${sku}`; }
+// Joins the Outbound (shipment/product lines with quantities) and SN
+// (one row per kit serial) reports on 出库单号+运单号+SKU, cross-checking
+// WMS单号/ERP单号, then reconciles 发货数 against the distinct serial count
+// per group — never a blind many-to-many join.
+function d365fJoinSfReports(outboundRows, snRows){
+  const groups = new Map();
+  for(const o of outboundRows){
+    const key = d365fSfGroupKey(o.outboundOrderId, o.awb, o.sku);
+    if(!groups.has(key)) groups.set(key, { outboundLines: [], snRecords: [] });
+    groups.get(key).outboundLines.push(o);
+  }
+  for(const s of snRows){
+    const key = d365fSfGroupKey(s.outboundOrderId, s.awb, s.sku);
+    if(!groups.has(key)) groups.set(key, { outboundLines: [], snRecords: [] });
+    groups.get(key).snRecords.push(s);
+  }
+  const kits = [];
+  for(const [key, g] of groups.entries()){
+    if(!g.outboundLines.length){
+      for(const s of g.snRecords){
+        kits.push({
+          shopifyRef: s.erpRef, outboundOrderId: s.outboundOrderId, wmsOrderId: s.wmsOrderId, awb: s.awb,
+          returnWaybill: null, productDescription: s.productDescription, serial: s.serial,
+          shippingDate: null, shippingDateText: null, sourceSheet: s.sourceSheet, sourceRow: s.sourceRow,
+          issues: [`No matching Outbound report line for this SN record (出库单号/运单号/SKU: ${key})`]
+        });
+      }
+      continue;
+    }
+    const ref = g.outboundLines[0];
+    const groupIssues = [];
+    const wmsSet = new Set(g.outboundLines.map(o=>o.wmsOrderId).filter(Boolean));
+    const erpSet = new Set(g.outboundLines.map(o=>o.erpRef).filter(Boolean));
+    if(wmsSet.size>1) groupIssues.push(`Inconsistent WMS单号 within this shipment/SKU group: ${[...wmsSet].join(", ")}`);
+    if(erpSet.size>1) groupIssues.push(`Inconsistent ERP单号 within this shipment/SKU group: ${[...erpSet].join(", ")}`);
+    const ineligibleReasons = new Set(g.outboundLines.filter(o=>!o.eligible).map(o=>o.eligibilityReason));
+    groupIssues.push(...ineligibleReasons);
+    for(const o of g.outboundLines) groupIssues.push(...o.issues.filter(i=>i!==o.eligibilityReason));
+    const expectedQty = g.outboundLines.reduce((sum,o)=>sum+(o.shippedQty||0),0);
+    const serialCounts = new Map();
+    for(const s of g.snRecords){
+      if(!s.serial) continue;
+      serialCounts.set(s.serial, (serialCounts.get(s.serial)||0)+1);
+      if(s.wmsOrderId && ref.wmsOrderId && s.wmsOrderId !== ref.wmsOrderId) groupIssues.push(`SN record WMS单号 "${s.wmsOrderId}" doesn't match Outbound report's "${ref.wmsOrderId}"`);
+      if(s.erpRef && ref.erpRef && s.erpRef !== ref.erpRef) groupIssues.push(`SN record ERP单号 "${s.erpRef}" doesn't match Outbound report's "${ref.erpRef}"`);
+    }
+    const distinctSerials = [...serialCounts.keys()];
+    const dupSerials = [...serialCounts.entries()].filter(([,c])=>c>1).map(([s])=>s);
+    if(dupSerials.length) groupIssues.push(`Duplicate serial(s) in SN report for this group: ${dupSerials.join(", ")}`);
+    if(distinctSerials.length < expectedQty) groupIssues.push(`Missing serial(s): Outbound report shows ${expectedQty} shipped, only ${distinctSerials.length} distinct serial(s) found in SN report`);
+    if(distinctSerials.length > expectedQty) groupIssues.push(`Extra serial(s): SN report has ${distinctSerials.length} distinct serial(s) but Outbound report shows only ${expectedQty} shipped`);
+    if(!distinctSerials.length){
+      kits.push({
+        shopifyRef: ref.erpRef, outboundOrderId: ref.outboundOrderId, wmsOrderId: ref.wmsOrderId, awb: ref.awb,
+        returnWaybill: ref.returnWaybill, productDescription: ref.productDescription, serial: null,
+        shippingDate: ref.shippingDate, shippingDateText: ref.shippingDateText, sourceSheet: ref.sourceSheet, sourceRow: ref.sourceRow,
+        issues: [...groupIssues, "No serial numbers found in SN report for this shipment/SKU group"]
+      });
+      continue;
+    }
+    for(const serial of distinctSerials){
+      kits.push({
+        shopifyRef: ref.erpRef, outboundOrderId: ref.outboundOrderId, wmsOrderId: ref.wmsOrderId, awb: ref.awb,
+        returnWaybill: ref.returnWaybill, productDescription: ref.productDescription, serial,
+        shippingDate: ref.shippingDate, shippingDateText: ref.shippingDateText, sourceSheet: ref.sourceSheet, sourceRow: ref.sourceRow,
+        issues: [...groupIssues]
+      });
+    }
+  }
+  return kits;
+}
 
 /* ---- On-hand report: generic column mapping (no real sample calibrated yet) ---- */
 const D365F_ONHAND_FIELD_GUESSES = {
@@ -1317,7 +1543,7 @@ function d365fGuessOnhandMapping(headers){
   for(const field of Object.keys(D365F_ONHAND_FIELD_GUESSES)) guess[field] = lower.findIndex(h => D365F_ONHAND_FIELD_GUESSES[field].some(g=>h.includes(g)));
   return guess;
 }
-function d365fBuildOnhandIndex(aoa, headerIdx, mapping){
+function d365fBuildOnhandIndex(aoa, headerIdx, mapping, cfg){
   const index = new Map();
   for(let r=headerIdx+1; r<aoa.length; r++){
     const row = aoa[r]||[];
@@ -1332,8 +1558,8 @@ function d365fBuildOnhandIndex(aoa, headerIdx, mapping){
       warehouse: mapping.warehouse>=0 ? String(row[mapping.warehouse]||"").trim() : null,
       location: mapping.location>=0 ? String(row[mapping.location]||"").trim() : null
     };
-    if(entry.legalEntity && entry.legalEntity !== D365F_LEGAL_ENTITY) continue;
-    if(entry.warehouse && entry.warehouse !== D365F_WAREHOUSE) continue;
+    if(entry.legalEntity && entry.legalEntity !== cfg.legalEntity) continue;
+    if(entry.warehouse && entry.warehouse !== cfg.warehouse) continue;
     if(entry.location && !/primary/i.test(entry.location)) continue;
     if(!index.has(sku)) index.set(sku, []);
     index.get(sku).push(entry);
@@ -1356,26 +1582,36 @@ function d365fRecomputeBatchIssue(row){
   if(row.sku && !row.batch && !hasOnhandIssue) row.issues.push(`No default or on-hand batch configured for SKU "${row.sku}" — enter one manually`);
 }
 function d365fMatchAndAssign(){
+  const cfg = d365fCfg();
+  const carrier = D365F.carrier;
   const refToSku = d365fShipmentReferenceToSkuMap();
   const onhandRemaining = new Map();
   if(D365F.onHand && D365F.onHand.index){
     for(const [sku, entries] of D365F.onHand.index.entries()) onhandRemaining.set(sku, entries.map(e=>({batch:e.batch, available:e.available})));
   }
   const seenFingerprints = new Set();
-  const historyFingerprints = new Set();
+  const historyFingerprints = new Set();   // exact order+awb+serial, any carrier, any confirmed run
+  const historySerials = new Set();        // order+serial only — catches the SAME physical kit re-sent via a different carrier/AWB
   for(const run of D365F.history){
     if(run.status !== "confirmed") continue;
-    for(const k of (run.records||[])) historyFingerprints.add(k.fingerprint);
+    for(const k of (run.records||[])){
+      if(k.fingerprint) historyFingerprints.add(k.fingerprint);
+      if(k.serialFingerprint) historySerials.add(k.serialFingerprint);
+    }
   }
-  const results = D365F.fedexKits.map(kit=>{
+  const results = D365F.kits.map(kit=>{
     const issues = [...kit.issues];
     let salesOrder = null, sku = null, matchNote = "";
-    const candidates = D365F.jobOrderIndex ? (D365F.jobOrderIndex.get(kit.shopifyRef)||[]) : [];
-    if(!D365F.jobOrderIndex){
+    const lookup = d365fLookupJobOrder(kit.shopifyRef, D365F.jobOrderIndex);
+    let resolvedRef = lookup.resolvedRef, matchMethod = lookup.method;
+    if(matchMethod === "no-job-order-file"){
       issues.push("Job Order file not loaded yet");
-    } else if(!candidates.length){
-      issues.push(`No matching Job Order record for Shopify reference "${kit.shopifyRef}"`);
+    } else if(matchMethod === "alias-candidate-unconfirmed"){
+      issues.push(`No exact Job Order match for "${kit.shopifyRef}", but a record exists for "${lookup.resolvedRef}" (stripping a trailing "-re") — confirm this is the same order before it can export`);
+    } else if(matchMethod === "none"){
+      issues.push(`No matching Job Order record for reference "${kit.shopifyRef}"`);
     } else {
+      const candidates = lookup.candidates;
       const distinctSkus = [...new Set(candidates.map(c=>c.sku))];
       if(distinctSkus.length === 1){
         salesOrder = candidates[0].salesOrder; sku = distinctSkus[0];
@@ -1383,37 +1619,40 @@ function d365fMatchAndAssign(){
         const resolvedSku = refToSku[kit.productDescription];
         const match = resolvedSku ? candidates.find(c=>c.sku===resolvedSku) : null;
         if(match){ salesOrder = match.salesOrder; sku = match.sku; matchNote = `Resolved from ${distinctSkus.length} candidate SKUs via product description "${kit.productDescription}"`; }
-        else issues.push(`Order "${kit.shopifyRef}" has ${distinctSkus.length} different SKUs on the Job Order file (${distinctSkus.join(", ")}) and the FedEx product description "${kit.productDescription}" didn't resolve to one — pick the correct line manually`);
+        else issues.push(`Order "${resolvedRef}" has ${distinctSkus.length} different SKUs on the Job Order file (${distinctSkus.join(", ")}) and the product description "${kit.productDescription}" didn't resolve to one — pick the correct line manually`);
       }
     }
     let batch = "", batchSource = "";
     if(sku){
+      const preferredBatch = D365F.defaultBatches[carrier][sku] || null;
       const onhandList = onhandRemaining.get(sku);
       if(onhandList && onhandList.length){
-        let pick = onhandList.find(b=>b.batch==="fedex" && b.available>0);
+        let pick = preferredBatch ? onhandList.find(b=>b.batch===preferredBatch && b.available>0) : null;
         if(!pick){
           const eligible = onhandList.filter(b=>b.available>0);
           if(eligible.length === 1) pick = eligible[0];
           else if(eligible.length > 1) issues.push(`Multiple on-hand batches could cover SKU "${sku}" (${eligible.map(b=>`${b.batch}:${b.available}`).join(", ")}) — pick one manually`);
-          else issues.push(`On-hand report has no available quantity left for SKU "${sku}" in ${D365F_LEGAL_ENTITY}/${D365F_WAREHOUSE}/Primary`);
+          else issues.push(`On-hand report has no available quantity left for SKU "${sku}" in ${cfg.legalEntity}/${cfg.warehouse}/Primary`);
         }
         if(pick){ batch = pick.batch; batchSource = "On-hand"; pick.available -= 1; }
       } else {
-        batch = D365F.defaultBatches[sku] || "";
+        batch = preferredBatch || "";
         batchSource = batch ? "Default" : "";
       }
     }
-    const fingerprint = `${kit.shopifyRef}|${kit.awb}|${kit.serial}`;
-    if(kit.awb && kit.serial){
+    const fingerprint = (kit.awb && kit.serial) ? `${kit.shopifyRef}|${kit.awb}|${kit.serial}` : null;
+    const serialFingerprint = (resolvedRef && kit.serial) ? `${resolvedRef}|${kit.serial}` : null;
+    if(fingerprint){
       if(seenFingerprints.has(fingerprint)) issues.push("Duplicate kit record within this upload (same order + AWB + serial appears more than once)");
       seenFingerprints.add(fingerprint);
       if(historyFingerprints.has(fingerprint)) issues.push("This exact kit (order + AWB + serial) was already marked Import confirmed in a previous run");
+      else if(serialFingerprint && historySerials.has(serialFingerprint)) issues.push("This serial was already marked Import confirmed on this order under a different AWB/carrier — refusing to fulfill the same kit twice");
     }
     const row = {
-      shopifyRef: kit.shopifyRef, salesOrder, sku, matchNote,
-      shippingDateText: kit.shippingDateText, awb: kit.awb, serial: kit.serial, productDescription: kit.productDescription,
-      warehouseLocation: D365F_WAREHOUSE_LOCATION, batch, batchSource, fingerprint,
-      sourceSheet: kit.sourceSheet, sourceRow: kit.sourceRow, issues
+      carrier, rawRef: kit.shopifyRef, shopifyRef: resolvedRef || kit.shopifyRef, matchMethod, salesOrder, sku, matchNote,
+      shippingDateText: kit.shippingDateText, awb: kit.awb, serial: kit.serial, returnWaybill: kit.returnWaybill || null,
+      productDescription: kit.productDescription, warehouseLocation: cfg.warehouseLocation, batch, batchSource,
+      fingerprint, serialFingerprint, sourceSheet: kit.sourceSheet, sourceRow: kit.sourceRow, issues
     };
     if(sku) d365fRecomputeBatchIssue(row);
     return row;
@@ -1421,14 +1660,29 @@ function d365fMatchAndAssign(){
   D365F.matched = results;
   return results;
 }
+function d365fConfirmAlias(rawRef, resolvedRef){
+  D365F.confirmedAliases[rawRef] = resolvedRef;
+  d365fSaveConfirmedAliases(D365F.confirmedAliases);
+  d365fMatchAndAssign();
+  d365fRenderAll();
+}
 
 /* ---- Export (template-exact workbook) ---- */
+// Only promote a digit string to a real Number when doing so loses nothing
+// (no leading zero, no non-digit characters, within safe-integer range) —
+// otherwise write it as text so Excel can never silently reformat it.
+function d365fSafeNumeric(str){
+  const s = String(str||"");
+  return s.length>0 && s.length<=15 && /^\d+$/.test(s) && String(Number(s))===s;
+}
 function d365fBuildWorkbook(records){
   const orderRows = [["Shipped date","Order ID","AWB","SKU Number","Warehouse location","Batch Number"]];
   const serialRows = [["Order ID","SKU Number","Serial number"]];
   for(const r of records){
-    orderRows.push([r.shippingDateText, r.salesOrder, Number(r.awb), r.sku, r.warehouseLocation, r.batch]);
-    serialRows.push([r.salesOrder, r.sku, Number(r.serial)]);
+    const awbVal = d365fSafeNumeric(r.awb) ? Number(r.awb) : String(r.awb||"");
+    const serialVal = d365fSafeNumeric(r.serial) ? Number(r.serial) : String(r.serial||"");
+    orderRows.push([r.shippingDateText, r.salesOrder, awbVal, r.sku, r.warehouseLocation, r.batch]);
+    serialRows.push([r.salesOrder, r.sku, serialVal]);
   }
   const wb = XLSX.utils.book_new();
   const wsOrder = XLSX.utils.aoa_to_sheet(orderRows);
@@ -1436,11 +1690,11 @@ function d365fBuildWorkbook(records){
   for(let i=1;i<orderRows.length;i++){
     const rn = i+1;
     if(wsOrder[`A${rn}`]) wsOrder[`A${rn}`].z = "@";
-    if(wsOrder[`C${rn}`]) wsOrder[`C${rn}`].z = "0";
+    if(wsOrder[`C${rn}`] && wsOrder[`C${rn}`].t==="n") wsOrder[`C${rn}`].z = "0";
   }
   for(let i=1;i<serialRows.length;i++){
     const rn = i+1;
-    if(wsSerial[`C${rn}`]) wsSerial[`C${rn}`].z = "0";
+    if(wsSerial[`C${rn}`] && wsSerial[`C${rn}`].t==="n") wsSerial[`C${rn}`].z = "0";
   }
   XLSX.utils.book_append_sheet(wb, wsOrder, "order");
   XLSX.utils.book_append_sheet(wb, wsSerial, "serial number");
@@ -1479,12 +1733,13 @@ function d365fRenderBatchDefaults(){
   const skus = [...new Set(D365F.matched.map(r=>r.sku).filter(Boolean))];
   if(!skus.length){ card.style.display = "none"; return; }
   card.style.display = "block";
+  const carrier = D365F.carrier;
   document.getElementById("d365fBatchDefaults").innerHTML = skus.map(sku=>`
-    <div><label style="display:block;font-size:11.5px;color:var(--fg2);margin-bottom:4px;">${sku}</label>
-    <input type="text" data-default-batch-sku="${sku}" value="${(D365F.defaultBatches[sku]||"").replace(/"/g,'&quot;')}" placeholder="batch number" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);"></div>`).join("");
+    <div><label style="display:block;font-size:11.5px;color:var(--fg2);margin-bottom:4px;">${sku} <span style="opacity:.6;">(${d365fCfg().label})</span></label>
+    <input type="text" data-default-batch-sku="${sku}" value="${(D365F.defaultBatches[carrier][sku]||"").replace(/"/g,'&quot;')}" placeholder="batch number" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);"></div>`).join("");
   document.querySelectorAll("[data-default-batch-sku]").forEach(input=>{
     input.addEventListener("change", ()=>{
-      D365F.defaultBatches[input.dataset.defaultBatchSku] = input.value.trim();
+      D365F.defaultBatches[carrier][input.dataset.defaultBatchSku] = input.value.trim();
       d365fSaveDefaultBatches(D365F.defaultBatches);
       d365fMatchAndAssign();
       d365fRenderAll();
@@ -1506,13 +1761,19 @@ function d365fRenderTable(){
   const card = document.getElementById("d365fReviewCard");
   if(!D365F.matched.length){ card.style.display = "none"; return; }
   card.style.display = "block";
+  const isSf = D365F.carrier === "sf";
   const thead = document.querySelector("#d365fTable thead"), tbody = document.querySelector("#d365fTable tbody");
-  thead.innerHTML = `<tr><th style="${TABLE_TH}">Shopify ref</th><th style="${TABLE_TH}">D365 order</th><th style="${TABLE_TH}">SKU</th><th style="${TABLE_TH}">Ship date</th><th style="${TABLE_TH}">AWB</th><th style="${TABLE_TH}">Serial</th><th style="${TABLE_TH}">Batch</th><th style="${TABLE_TH}">Source</th><th style="${TABLE_TH}">Status</th></tr>`;
+  thead.innerHTML = `<tr><th style="${TABLE_TH}">Raw ref</th><th style="${TABLE_TH}">D365 order</th><th style="${TABLE_TH}">SKU</th><th style="${TABLE_TH}">Ship date</th><th style="${TABLE_TH}">AWB</th>${isSf?`<th style="${TABLE_TH}">Return waybill</th>`:""}<th style="${TABLE_TH}">Serial</th><th style="${TABLE_TH}">Batch</th><th style="${TABLE_TH}">Source</th><th style="${TABLE_TH}">Status</th></tr>`;
   tbody.innerHTML = D365F.matched.map((r,i)=>{
     const ok = r.issues.length===0;
+    const refCell = r.matchMethod==="alias-candidate-unconfirmed"
+      ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">→ ${r.shopifyRef}? <button data-confirm-alias="${i}" style="${BTN_SMALL}padding:2px 8px;background:var(--im8-red-algae);color:#fff;">Confirm alias</button></span>`
+      : (r.matchMethod==="confirmed-alias" ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">= ${r.shopifyRef} (confirmed)</span>` : r.shopifyRef);
     return `<tr>
-      <td style="${TABLE_TD_NOWRAP}">${r.shopifyRef}</td><td style="${TABLE_TD_NOWRAP}">${r.salesOrder||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.sku||"—"}</td>
-      <td style="${TABLE_TD_NOWRAP}">${r.shippingDateText||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.awb||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.serial||"—"}</td>
+      <td style="${TABLE_TD}">${refCell}</td><td style="${TABLE_TD_NOWRAP}">${r.salesOrder||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.sku||"—"}</td>
+      <td style="${TABLE_TD_NOWRAP}">${r.shippingDateText||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.awb||"—"}</td>
+      ${isSf?`<td style="${TABLE_TD_NOWRAP}">${r.returnWaybill||"—"}</td>`:""}
+      <td style="${TABLE_TD_NOWRAP}">${r.serial||"—"}</td>
       <td style="${TABLE_TD}"><input type="text" data-row-batch="${i}" value="${(r.batch||"").replace(/"/g,'&quot;')}" style="width:100px;font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);"></td>
       <td style="${TABLE_TD}">${r.batchSource||"—"}</td>
       <td style="${TABLE_TD}">${ok?`<span style="${pillStyle('ready')}">READY</span>`:`<span style="${pillStyle('hold')}">BLOCKED</span>`}${r.issues.map(iss=>`<span style="${TAG_STYLE}">${iss}</span>`).join("")}${r.matchNote?`<span style="${TAG_STYLE}background:var(--im8-cream);">${r.matchNote}</span>`:""}</td>
@@ -1525,6 +1786,12 @@ function d365fRenderTable(){
       row.batchSource = row.batch ? "Manual" : "";
       d365fRecomputeBatchIssue(row);
       d365fRenderAll();
+    });
+  });
+  document.querySelectorAll("[data-confirm-alias]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const row = D365F.matched[Number(btn.dataset.confirmAlias)];
+      d365fConfirmAlias(row.rawRef, row.shopifyRef);
     });
   });
 }
@@ -1544,13 +1811,13 @@ function d365fRenderExportCard(){
 }
 function d365fRenderHistory(){
   const tbody = document.querySelector("#d365fHistoryTable tbody");
-  document.querySelector("#d365fHistoryTable thead").innerHTML = `<tr><th style="${TABLE_TH}">Run</th><th style="${TABLE_TH}">Generated</th><th style="${TABLE_TH}">File</th><th style="${TABLE_TH}">Kits</th><th style="${TABLE_TH}">Status</th><th style="${TABLE_TH}"></th></tr>`;
-  if(!D365F.history.length){ tbody.innerHTML = `<tr><td style="${TABLE_TD}" colspan="6">No runs yet.</td></tr>`; return; }
+  document.querySelector("#d365fHistoryTable thead").innerHTML = `<tr><th style="${TABLE_TH}">Run</th><th style="${TABLE_TH}">Carrier</th><th style="${TABLE_TH}">Generated</th><th style="${TABLE_TH}">File</th><th style="${TABLE_TH}">Kits</th><th style="${TABLE_TH}">Status</th><th style="${TABLE_TH}"></th></tr>`;
+  if(!D365F.history.length){ tbody.innerHTML = `<tr><td style="${TABLE_TD}" colspan="7">No runs yet.</td></tr>`; return; }
   tbody.innerHTML = [...D365F.history].reverse().map(run=>{
     const idx = D365F.history.indexOf(run);
     const canRegen = run.status !== "confirmed";
     return `<tr>
-      <td style="${TABLE_TD_NOWRAP}">${run.runId}</td><td style="${TABLE_TD_NOWRAP}">${new Date(run.timestamp).toLocaleString()}</td>
+      <td style="${TABLE_TD_NOWRAP}">${run.runId}</td><td style="${TABLE_TD_NOWRAP}">${D365F_CARRIER_CONFIG[run.carrier]?.label || run.carrier || "—"}</td><td style="${TABLE_TD_NOWRAP}">${new Date(run.timestamp).toLocaleString()}</td>
       <td style="${TABLE_TD}">${run.outputFilename}</td><td style="${TABLE_TD}">${(run.records||[]).length}</td>
       <td style="${TABLE_TD}">${run.status}</td>
       <td style="${TABLE_TD}">
@@ -1579,9 +1846,10 @@ function d365fRecordRun(records, filename){
   const run = {
     runId: `run-${Date.now()}-${D365F.runSeq}`,
     timestamp: Date.now(),
+    carrier: D365F.carrier,
     outputFilename: filename,
     status: "generated",
-    records: records.map(r=>({ shopifyRef:r.shopifyRef, salesOrder:r.salesOrder, sku:r.sku, shippingDateText:r.shippingDateText, awb:r.awb, serial:r.serial, warehouseLocation:r.warehouseLocation, batch:r.batch, fingerprint:r.fingerprint }))
+    records: records.map(r=>({ shopifyRef:r.shopifyRef, salesOrder:r.salesOrder, sku:r.sku, shippingDateText:r.shippingDateText, awb:r.awb, serial:r.serial, returnWaybill:r.returnWaybill, warehouseLocation:r.warehouseLocation, batch:r.batch, fingerprint:r.fingerprint, serialFingerprint:r.serialFingerprint }))
   };
   D365F.history.push(run);
   d365fSaveHistory(D365F.history);
@@ -1874,19 +2142,51 @@ document.getElementById("btnResetCfg").addEventListener("click", ()=>{
   saveConfig(CONFIG); renderConfig(); toast("Config reset to defaults");
 });
 /* ---- D365 Fulfillment wiring ---- */
-let d365fUploaded = { fedex: null, joborder: null, onhand: null };
+let d365fUploaded = { fedex: null, sfoutbound: null, sfsn: null, joborder: null, onhand: null };
 function d365fCheckReady(){
   const btn = document.getElementById("btnD365fProcess");
-  const ok = !!(d365fUploaded.fedex && d365fUploaded.joborder);
+  const ok = D365F.carrier === "sf"
+    ? !!(d365fUploaded.sfoutbound && d365fUploaded.sfsn && d365fUploaded.joborder)
+    : !!(d365fUploaded.fedex && d365fUploaded.joborder);
   btn.disabled = !ok; btn.style.opacity = ok ? "1" : "0.4";
 }
 function d365fStatusLine(){
   const lines = [];
-  if(d365fUploaded.fedex) lines.push(`FedEx report: ${D365F.fedexKits.length} kit row(s) parsed${D365F.fedexIssues.length?` — ⚠ ${D365F.fedexIssues.join("; ")}`:""}.`);
+  if(D365F.carrier === "sf"){
+    if(d365fUploaded.sfoutbound) lines.push(`SF Outbound report: ${D365F.sfOutboundRows ? D365F.sfOutboundRows.length : 0} line(s) parsed.`);
+    if(d365fUploaded.sfsn) lines.push(`SF Outbound SN report: ${D365F.sfSnRows ? D365F.sfSnRows.length : 0} serial(s) parsed.`);
+    if(d365fUploaded.sfoutbound && d365fUploaded.sfsn) lines.push(`Joined into ${D365F.kits.length} kit(s).`);
+  } else {
+    if(d365fUploaded.fedex) lines.push(`FedEx report: ${D365F.kits.length} kit row(s) parsed${D365F.parseIssues.length?` — ⚠ ${D365F.parseIssues.join("; ")}`:""}.`);
+  }
   if(d365fUploaded.joborder) lines.push(D365F.jobOrderIndex ? `Job Order file: ${D365F.jobOrderIndex.size} Shopify reference(s) indexed.` : `Job Order file: headers didn't match — see mapping needed below.`);
   if(d365fUploaded.onhand) lines.push(D365F.onHand ? `On-hand report: loaded, mapping applied.` : `On-hand report: uploaded — map its columns below before matching.`);
   document.getElementById("d365fStatus").textContent = lines.join("\n");
 }
+function d365fSwitchCarrier(carrier){
+  D365F.carrier = carrier;
+  D365F.kits = []; D365F.parseIssues = []; D365F.matched = [];
+  D365F.sfOutboundRows = null; D365F.sfSnRows = null;
+  d365fUploaded.fedex = null; d365fUploaded.sfoutbound = null; d365fUploaded.sfsn = null;
+  document.getElementById("wrap-fxreport").style.display = carrier==="fedex" ? "" : "none";
+  document.getElementById("wrap-sfoutbound").style.display = carrier==="sf" ? "" : "none";
+  document.getElementById("wrap-sfsn").style.display = carrier==="sf" ? "" : "none";
+  [["dz-fxreport","fname-fxreport","Click or drop file"],["dz-sfoutbound","fname-sfoutbound","Click or drop file"],["dz-sfsn","fname-sfsn","Click or drop file"]].forEach(([zoneId,fnameId,label])=>{
+    const zone = document.getElementById(zoneId);
+    zone.style.borderStyle = "dashed"; zone.style.borderColor = "var(--border-strong)"; zone.style.background = "var(--bg-section)";
+    document.getElementById(fnameId).textContent = label;
+  });
+  const fedexBtn = document.getElementById("btnCarrierFedex"), sfBtn = document.getElementById("btnCarrierSf");
+  fedexBtn.style.background = carrier==="fedex" ? "var(--im8-red-algae)" : "transparent";
+  fedexBtn.style.color = carrier==="fedex" ? "#fff" : "var(--fg-heading)";
+  fedexBtn.style.border = carrier==="fedex" ? "none" : "1.5px solid var(--im8-burgundy)";
+  sfBtn.style.background = carrier==="sf" ? "var(--im8-red-algae)" : "transparent";
+  sfBtn.style.color = carrier==="sf" ? "#fff" : "var(--fg-heading)";
+  sfBtn.style.border = carrier==="sf" ? "none" : "1.5px solid var(--im8-burgundy)";
+  d365fStatusLine(); d365fCheckReady(); d365fRenderAll();
+}
+document.getElementById("btnCarrierFedex").addEventListener("click", ()=>d365fSwitchCarrier("fedex"));
+document.getElementById("btnCarrierSf").addEventListener("click", ()=>d365fSwitchCarrier("sf"));
 wireDropzone("dz-fxreport","file-fxreport", files=>{
   const file = files[0];
   const reader = new FileReader();
@@ -1894,11 +2194,47 @@ wireDropzone("dz-fxreport","file-fxreport", files=>{
     try{
       const wb = XLSX.read(e.target.result, {type:"array"});
       const { kits, issues } = d365fParseFedexReport(wb);
-      D365F.fedexKits = kits; D365F.fedexIssues = issues;
+      D365F.kits = kits; D365F.parseIssues = issues;
       d365fUploaded.fedex = file;
       markFilled("dz-fxreport","fname-fxreport",file.name);
       d365fStatusLine(); d365fCheckReady();
     }catch(err){ toast("Failed to parse FedEx report: "+err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+});
+function d365fTryJoinSf(){
+  if(D365F.sfOutboundRows && D365F.sfSnRows) D365F.kits = d365fJoinSfReports(D365F.sfOutboundRows, D365F.sfSnRows);
+}
+wireDropzone("dz-sfoutbound","file-sfoutbound", files=>{
+  const file = files[0];
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const wb = XLSX.read(e.target.result, {type:"array"});
+      const { rows, issues } = d365fParseSfOutbound(wb);
+      D365F.sfOutboundRows = rows; D365F.parseIssues = issues;
+      d365fUploaded.sfoutbound = file;
+      markFilled("dz-sfoutbound","fname-sfoutbound",file.name);
+      d365fTryJoinSf();
+      d365fStatusLine(); d365fCheckReady();
+    }catch(err){ toast("Failed to parse SF Outbound report: "+err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+});
+wireDropzone("dz-sfsn","file-sfsn", files=>{
+  const file = files[0];
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const wb = XLSX.read(e.target.result, {type:"array"});
+      const { rows, issues } = d365fParseSfSn(wb);
+      D365F.sfSnRows = rows;
+      D365F.parseIssues = [...D365F.parseIssues, ...issues];
+      d365fUploaded.sfsn = file;
+      markFilled("dz-sfsn","fname-sfsn",file.name);
+      d365fTryJoinSf();
+      d365fStatusLine(); d365fCheckReady();
+    }catch(err){ toast("Failed to parse SF Outbound SN report: "+err.message); }
   };
   reader.readAsArrayBuffer(file);
 });
@@ -1942,7 +2278,7 @@ document.getElementById("btnD365fApplyOnhandMap").addEventListener("click", ()=>
   document.querySelectorAll("[data-onhand-field]").forEach(sel=>{ mapping[sel.dataset.onhandField] = Number(sel.value); });
   if(mapping.sku < 0 || mapping.available < 0){ toast("SKU and Available qty columns are required to use the on-hand report"); return; }
   const headerIdx = 0;
-  const index = d365fBuildOnhandIndex(D365F.onHandRawRows, headerIdx, mapping);
+  const index = d365fBuildOnhandIndex(D365F.onHandRawRows, headerIdx, mapping, d365fCfg());
   D365F.onHand = { index, mapping };
   toast("On-hand mapping applied");
   d365fStatusLine();
@@ -1957,7 +2293,9 @@ document.getElementById("btnD365fDownload").addEventListener("click", ()=>{
   const { toExport } = d365fComputeExportSet();
   if(!toExport.length) return;
   const stamp = new Date().toISOString().slice(0,10);
-  const filename = `D365_Fulfillment_${D365F_LEGAL_ENTITY}_${D365F_WAREHOUSE}_${stamp}_run${D365F.history.length+1}.xlsx`;
+  const cfg = d365fCfg();
+  const carrierTag = D365F.carrier==="sf" ? "SF" : "FedEx";
+  const filename = `D365_Fulfillment_${carrierTag}_${cfg.legalEntity}_${cfg.warehouse}_${stamp}_run${D365F.history.length+1}.xlsx`;
   const blob = d365fBuildWorkbook(toExport);
   download(filename, blob);
   d365fRecordRun(toExport, filename);
