@@ -70,7 +70,7 @@
       <button data-tab="history" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">History</button>
       <button data-tab="config" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">Config</button>
       <div style="height:1px;background:rgba(255,255,255,0.14);margin:10px 2px;"></div>
-      <button data-tab="d365fulfill" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);display:flex;align-items:center;justify-content:space-between;">D365 Fulfillment <span style="background:rgba(255,150,147,0.22);color:#fff;border-radius:20px;font-size:9.5px;padding:1px 6px;font-weight:700;letter-spacing:.04em;">BETA</span></button>
+      <button data-tab="d365fulfill" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">D365 Fulfillment</button>
     </nav>
     <div style="border-top:1px solid rgba(255,255,255,0.14);padding-top:14px;font-size:11.5px;color:rgba(255,255,255,0.6);" id="dateLabel">Processing date: —</div>
   </aside>
@@ -182,11 +182,11 @@
       </div>
     </section>
 
-    <!-- ========== D365 FULFILLMENT (BETA) ========== -->
+    <!-- ========== D365 FULFILLMENT ========== -->
     <section id="tab-d365fulfill" style="display:none">
       <div style="background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);">
         <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Generate D365 Fulfillment File</h2>
-        <div style="color:var(--fg2);font-size:13px;margin-bottom:4px;">Converts a carrier's daily shipment report(s) into a D365 import workbook (tracking, serials, batch). This is staging-only — nothing here touches the main Upload → Review → Resolve → Export pipeline.</div>
+        <div style="color:var(--fg2);font-size:13px;margin-bottom:4px;">Converts a carrier's daily shipment report(s) into a D365 import workbook (tracking, serials, batch). This is a separate workflow from the main Upload → Review → Resolve → Export pipeline above — nothing here touches it.</div>
         <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">Generating a file never marks an order fulfilled, picked, or packed in D365 — that still happens when you actually import it.</div>
         <div style="display:flex;gap:8px;margin-bottom:16px;">
           <button id="btnCarrierFedex" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:8px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">FedEx (H001/OPS-WH07)</button>
@@ -1154,7 +1154,7 @@ function renderReviewTable(){
 }
 
 /* ======================================================================
-   D365 FULFILLMENT FILE GENERATOR (staging/beta — v2 only)
+   D365 FULFILLMENT FILE GENERATOR
    Converts a carrier's daily shipment report(s) + the existing morning
    Job Order export into a D365 import workbook (tracking/serial/batch).
    Two carriers share this one pipeline (Job Order matching, on-hand
