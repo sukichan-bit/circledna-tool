@@ -1398,16 +1398,21 @@ function d365fParseJobOrder(workbook){
   }
   return { index, needsMapping: null };
 }
-// Resolves a raw order reference to Job Order candidates. SF's ERP reference
-// always carries a trailing "-re" relative to the actual Shopify reference
-// (e.g. "DNA-15656-re" for Shopify order "DNA-15656") — confirmed as a
-// standing format rule, not a per-order guess, so it's stripped
-// automatically here rather than requiring manual confirmation every run.
+// Resolves a raw order reference to Job Order candidates. Two confirmed
+// standing suffix rules, both auto-stripped (no per-order confirmation,
+// same as this tool's own FedEx export splits a >4-kit Shopify order into
+// multiple ≤4-kit shipments named "DNA-15615", "DNA-15615_1", ... — the
+// warehouse's own Daily Report echoes those same Transaction IDs back, but
+// the Job Order file only ever has the base "DNA-15615" line):
+//  - FedEx split-shipment suffix: trailing "_<number>" (e.g. "..._1")
+//  - SF's resend suffix: trailing "-re" (e.g. "DNA-15656-re")
 function d365fLookupJobOrder(rawRef, jobOrderIndex){
   if(!jobOrderIndex) return { candidates: null, resolvedRef: null, method: "no-job-order-file" };
   if(jobOrderIndex.has(rawRef)) return { candidates: jobOrderIndex.get(rawRef), resolvedRef: rawRef, method: "exact" };
-  const m = rawRef.match(/^(.*)-re$/i);
-  if(m && jobOrderIndex.has(m[1])) return { candidates: jobOrderIndex.get(m[1]), resolvedRef: m[1], method: "re-suffix-stripped" };
+  const splitMatch = rawRef.match(/^(.*)_\d+$/);
+  if(splitMatch && jobOrderIndex.has(splitMatch[1])) return { candidates: jobOrderIndex.get(splitMatch[1]), resolvedRef: splitMatch[1], method: "split-suffix-stripped" };
+  const reMatch = rawRef.match(/^(.*)-re$/i);
+  if(reMatch && jobOrderIndex.has(reMatch[1])) return { candidates: jobOrderIndex.get(reMatch[1]), resolvedRef: reMatch[1], method: "re-suffix-stripped" };
   return { candidates: null, resolvedRef: null, method: "none" };
 }
 
@@ -1728,6 +1733,25 @@ function d365fMatchAndAssign(){
     d365fRecomputeBatchIssue(row);
     return row;
   });
+  // A >4-kit order gets split into multiple FedEx shipments ("DNA-15615",
+  // "DNA-15615_1", ...), each with its own AWB — but once resolved to one
+  // D365 order, the D365 import expects every kit row for that order to
+  // list ALL of that order's tracking numbers together as "AWB1, AWB2",
+  // not just the individual kit's own shipment AWB. Built per resolved
+  // D365 order, preserving first-appearance order (which follows the
+  // Daily Report's own row order, so "_1"'s AWB naturally comes first).
+  // The Google Sheets paste output deliberately keeps using the
+  // individual per-kit `awb` instead — see d365fFedexOutboundRecords.
+  const awbGroups = new Map();
+  for(const row of results){
+    if(!row.salesOrder || !row.awb) continue;
+    if(!awbGroups.has(row.salesOrder)) awbGroups.set(row.salesOrder, []);
+    const list = awbGroups.get(row.salesOrder);
+    if(!list.includes(row.awb)) list.push(row.awb);
+  }
+  for(const row of results){
+    row.consolidatedAwb = (row.salesOrder && awbGroups.has(row.salesOrder)) ? awbGroups.get(row.salesOrder).join(", ") : row.awb;
+  }
   D365F.matched = results;
   return results;
 }
@@ -1744,7 +1768,8 @@ function d365fBuildWorkbook(records){
   const orderRows = [["Shipped date","Order ID","AWB","SKU Number","Warehouse location","Batch Number"]];
   const serialRows = [["Order ID","SKU Number","Serial number"]];
   for(const r of records){
-    const awbVal = d365fSafeNumeric(r.awb) ? Number(r.awb) : String(r.awb||"");
+    const awbForExport = r.consolidatedAwb || r.awb;
+    const awbVal = d365fSafeNumeric(awbForExport) ? Number(awbForExport) : String(awbForExport||"");
     const serialVal = d365fSafeNumeric(r.serial) ? Number(r.serial) : String(r.serial||"");
     orderRows.push([r.shippingDateText, r.salesOrder, awbVal, r.sku, r.warehouseLocation, r.batch]);
     serialRows.push([r.salesOrder, r.sku, serialVal]);
@@ -1922,10 +1947,15 @@ function d365fRenderTable(){
     const ok = r.issues.length===0;
     const refCell = r.matchMethod==="re-suffix-stripped"
       ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">= ${r.shopifyRef} (trailing "-re" stripped)</span>`
+      : r.matchMethod==="split-suffix-stripped"
+      ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">= ${r.shopifyRef} (split-shipment suffix stripped)</span>`
       : r.shopifyRef;
+    const awbCell = r.consolidatedAwb && r.consolidatedAwb !== r.awb
+      ? `${r.awb||"—"}<br><span style="color:var(--fg2);font-size:11px;">D365 AWB: ${r.consolidatedAwb}</span>`
+      : (r.awb||"—");
     return `<tr>
       <td style="${TABLE_TD}">${refCell}</td><td style="${TABLE_TD_NOWRAP}">${r.salesOrder||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.sku||"—"}</td>
-      <td style="${TABLE_TD_NOWRAP}">${r.shippingDateText||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.awb||"—"}</td>
+      <td style="${TABLE_TD_NOWRAP}">${r.shippingDateText||"—"}</td><td style="${TABLE_TD}">${awbCell}</td>
       ${isSf?`<td style="${TABLE_TD_NOWRAP}">${r.returnWaybill||"—"}</td>`:""}
       <td style="${TABLE_TD_NOWRAP}">${r.serial||"—"}</td>
       <td style="${TABLE_TD}"><input type="text" data-row-batch="${i}" value="${(r.batch||"").replace(/"/g,'&quot;')}" style="width:100px;font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);"></td>
@@ -2070,7 +2100,7 @@ function d365fRecordRun(records, filename){
     carrier: D365F.carrier,
     outputFilename: filename,
     status: "generated",
-    records: records.map(r=>({ shopifyRef:r.shopifyRef, salesOrder:r.salesOrder, sku:r.sku, shippingDateText:r.shippingDateText, awb:r.awb, serial:r.serial, returnWaybill:r.returnWaybill, warehouseLocation:r.warehouseLocation, batch:r.batch, fingerprint:r.fingerprint, serialFingerprint:r.serialFingerprint }))
+    records: records.map(r=>({ shopifyRef:r.shopifyRef, salesOrder:r.salesOrder, sku:r.sku, shippingDateText:r.shippingDateText, awb:r.awb, consolidatedAwb:r.consolidatedAwb, serial:r.serial, returnWaybill:r.returnWaybill, warehouseLocation:r.warehouseLocation, batch:r.batch, fingerprint:r.fingerprint, serialFingerprint:r.serialFingerprint }))
   };
   D365F.history.push(run);
   d365fSaveHistory(D365F.history);
