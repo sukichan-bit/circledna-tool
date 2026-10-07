@@ -62,15 +62,27 @@
       <div style="font-family:var(--font-sans);font-size:11px;letter-spacing:var(--track-micro);text-transform:uppercase;color:var(--im8-flamingo);margin-top:4px;">Order Conversion</div>
     </div>
     <nav id="tabs" style="display:flex;flex-direction:column;gap:4px;flex:1;">
-      <button data-tab="upload" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:#fff;">1. Upload</button>
-      <button data-tab="review" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);display:flex;align-items:center;justify-content:space-between;">2. Review <span id="issueBadge" style="display:none;background:var(--im8-flamingo);color:var(--im8-burgundy);border-radius:20px;font-size:10.5px;padding:1px 7px;font-weight:700;"></span></button>
-      <button data-tab="resolve" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">3. Resolve</button>
-      <button data-tab="export" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">4. Export</button>
+      <button id="group-exportorder-toggle" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13px;font-weight:700;font-family:var(--font-sans);color:#fff;letter-spacing:.02em;display:flex;align-items:center;justify-content:space-between;">
+        <span style="display:flex;align-items:center;gap:8px;">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><path d="M3.5 1.5h6l3 3v9a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1z"/><path d="M9.5 1.5v3h3"/><path d="M5.5 8.5h5M5.5 10.5h5M5.5 6.5h2.5"/></svg>
+          <span>Export Order file</span>
+        </span>
+        <span id="group-exportorder-chevron" style="font-size:10px;color:rgba(255,255,255,0.6);transition:transform .15s var(--motion-ease);">▾</span>
+      </button>
+      <div id="group-exportorder-items" style="display:flex;flex-direction:column;gap:4px;padding-left:10px;">
+        <button data-tab="upload" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:#fff;">1. Upload</button>
+        <button data-tab="review" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);display:flex;align-items:center;justify-content:space-between;">2. Review <span id="issueBadge" style="display:none;background:var(--im8-flamingo);color:var(--im8-burgundy);border-radius:20px;font-size:10.5px;padding:1px 7px;font-weight:700;"></span></button>
+        <button data-tab="resolve" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">3. Resolve</button>
+        <button data-tab="export" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">4. Export</button>
+        <div style="height:1px;background:rgba(255,255,255,0.14);margin:6px 2px;"></div>
+        <button data-tab="history" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">History</button>
+        <button data-tab="config" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">Config</button>
+      </div>
       <div style="height:1px;background:rgba(255,255,255,0.14);margin:10px 2px;"></div>
-      <button data-tab="history" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">History</button>
-      <button data-tab="config" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">Config</button>
-      <div style="height:1px;background:rgba(255,255,255,0.14);margin:10px 2px;"></div>
-      <button data-tab="d365fulfill" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;font-family:var(--font-sans);color:rgba(255,255,255,0.72);">D365 Fulfillment</button>
+      <button data-tab="d365fulfill" style="all:unset;cursor:pointer;padding:10px 14px;border-radius:10px;font-size:13px;font-weight:700;font-family:var(--font-sans);color:rgba(255,255,255,0.72);letter-spacing:.02em;display:flex;align-items:center;gap:8px;">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;"><path d="M8 1.5 14 4.5v7L8 14.5 2 11.5v-7z"/><path d="M2 4.5 8 7.5 14 4.5"/><path d="M8 7.5v7"/></svg>
+        <span>D365 Fulfillment</span>
+      </button>
     </nav>
     <div style="border-top:1px solid rgba(255,255,255,0.14);padding-top:14px;font-size:11.5px;color:rgba(255,255,255,0.6);" id="dateLabel">Processing date: —</div>
   </aside>
@@ -1066,12 +1078,18 @@ function toast(msg){
   t.textContent = msg; t.style.opacity = "1";
   setTimeout(()=>{ t.style.opacity = "0"; }, 2200);
 }
+const EXPORT_ORDER_GROUP_TABS = ["upload","review","resolve","export","history","config"];
+function setExportOrderGroupExpanded(expanded){
+  document.getElementById("group-exportorder-items").style.display = expanded ? "flex" : "none";
+  document.getElementById("group-exportorder-chevron").style.transform = expanded ? "rotate(0deg)" : "rotate(-90deg)";
+}
 function switchTab(name){
-  document.querySelectorAll("#tabs button").forEach(b=>{
+  document.querySelectorAll("#tabs button[data-tab]").forEach(b=>{
     const active = b.dataset.tab === name;
     b.style.color = active ? "#fff" : "rgba(255,255,255,0.72)";
     b.style.background = active ? "rgba(255,150,147,0.16)" : "transparent";
   });
+  if(EXPORT_ORDER_GROUP_TABS.includes(name)) setExportOrderGroupExpanded(true);
   document.querySelectorAll("main > section").forEach(s=>s.style.display="none");
   document.getElementById("tab-"+name).style.display="block";
   if(name==="history") renderHistory();
@@ -2314,8 +2332,12 @@ function renderConfig(){
 /* ======================================================================
    INIT
    ====================================================================== */
-document.querySelectorAll("#tabs button").forEach(btn=>{
+document.querySelectorAll("#tabs button[data-tab]").forEach(btn=>{
   btn.addEventListener("click", ()=> switchTab(btn.dataset.tab));
+});
+document.getElementById("group-exportorder-toggle").addEventListener("click", ()=>{
+  const expanded = document.getElementById("group-exportorder-items").style.display !== "none";
+  setExportOrderGroupExpanded(!expanded);
 });
 document.querySelectorAll("[data-nav]").forEach(btn=>{
   btn.addEventListener("click", ()=> switchTab(btn.dataset.nav));
@@ -2598,6 +2620,7 @@ document.getElementById("btnD365fDownloadSheets").addEventListener("click", ()=>
 });
 
 document.getElementById("processingDate").value = new Date().toISOString().slice(0,10);
+setExportOrderGroupExpanded(true);
 renderHistory();
 </script>
 </body>
