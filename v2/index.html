@@ -275,6 +275,21 @@
         </div>
       </div>
 
+      <div id="d365fSheetsCard" style="display:none;background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);">
+        <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Google Sheets paste outputs</h2>
+        <div style="color:var(--fg2);font-size:13px;margin-bottom:4px;">Prepares data for manual copy/paste into the <a href="https://docs.google.com/spreadsheets/d/125iKGNpWfOL8R-aoB7twqtsL91y8aUrxL5UaqADi2rU/edit" target="_blank" rel="noopener">Job Orders spreadsheet</a>. Nothing here writes to the sheet automatically — always select cell A of the next empty row yourself and paste values only.</div>
+        <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">A kit blocked only by a batch problem (no batch column exists in these outputs) still appears here even though it's excluded from the D365 workbook above. Rows blocked for a real matching/data problem are left out — check the counts below against the Review table if a row seems to be missing.</div>
+        <div id="d365fSheetsPanels"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+          <button id="btnD365fDownloadSheets" disabled style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:9px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);opacity:0.4;">Download Google Sheets paste workbook</button>
+        </div>
+        <div style="margin-top:16px;">
+          <div style="font-size:12.5px;font-weight:600;color:var(--fg-heading);margin-bottom:8px;">Recent paste actions</div>
+          <div style="color:var(--fg2);font-size:11.5px;margin-bottom:8px;">Tracks what's been copied/downloaded here, not whether it actually reached the Google Sheet — mark it yourself once pasted. No live comparison against the sheet's current contents is done; check manually before pasting if duplicates are a concern.</div>
+          <div style="max-height:220px;overflow:auto;border:1px solid var(--border-soft);border-radius:10px;"><table id="d365fSheetsHistoryTable" style="border-collapse:collapse;width:100%;font-size:12px;font-family:var(--font-sans);"><thead></thead><tbody></tbody></table></div>
+        </div>
+      </div>
+
       <div style="background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;box-shadow:var(--shadow-sm);">
         <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Run history</h2>
         <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">Stored in this browser only. File generation never confirms a D365 import — mark it yourself once you've actually imported and checked the result.</div>
@@ -1060,7 +1075,7 @@ function switchTab(name){
   document.getElementById("tab-"+name).style.display="block";
   if(name==="history") renderHistory();
   if(name==="config") renderConfig();
-  if(name==="d365fulfill") d365fRenderHistory();
+  if(name==="d365fulfill"){ d365fRenderHistory(); d365fRenderSheetsHistory(); }
   window.scrollTo(0,0);
 }
 function recordGenerated(date, fileKey){
@@ -1170,7 +1185,7 @@ function d365fSaveHistory(h){ localStorage.setItem("circledna_d365f_history", JS
 let D365F = {
   carrier: "fedex",
   kits: [], parseIssues: [],
-  sfOutboundRows: null, sfSnRows: null,
+  sfOutboundRows: null, sfSnRows: null, fedexAwbPairs: null,
   jobOrderIndex: null, jobOrderNeedsMapping: null,
   onHand: null,
   matched: [],
@@ -1213,6 +1228,17 @@ function d365fNormalizeSerial(raw){
   const stripped = String(raw||"").replace(/-/g,"").trim();
   return /^\d{14}$/.test(stripped) ? stripped : null;
 }
+// Lenient tracking extraction for the Google Sheets paste output only —
+// strips a FedEx tracking URL wrapper if present, but (unlike
+// d365fExtractAwb) does NOT enforce the D365 import's 12-digit rule, so
+// historical alphanumeric identifiers (e.g. "RO900699383HK") survive
+// unchanged instead of being discarded as invalid.
+function d365fExtractTrackingLenient(raw){
+  const s = String(raw||"").trim();
+  if(!s) return null;
+  const m = s.match(/trknbr=([^&\s]+)/i);
+  return m ? m[1] : s;
+}
 function d365fParseFedexDate(raw){
   if(raw instanceof Date && !isNaN(raw)) return raw;
   const s = String(raw||"").trim();
@@ -1226,6 +1252,13 @@ function d365fParseFedexDate(raw){
   return d;
 }
 function d365fFormatDateForD365(date){ return `${date.getMonth()+1}/${date.getDate()}/${date.getFullYear()}`; }
+const D365F_MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+// Unambiguous "d mmm yyyy" text (e.g. "7 Oct 2026") for the Google Sheets
+// paste outputs — distinct from the D365 importer's own M/D/YYYY text.
+function d365fFormatDateHuman(date){
+  if(!date) return "";
+  return `${date.getDate()} ${D365F_MONTH_ABBR[date.getMonth()]} ${date.getFullYear()}`;
+}
 function d365fParseFedexReport(workbook){
   const issues = [];
   const sheetName = workbook.SheetNames.find(n=>n.trim().toLowerCase()==="daily report") || workbook.SheetNames[0];
@@ -1269,21 +1302,44 @@ function d365fParseFedexReport(workbook){
       issues: rowIssues
     });
   }
-  // Cross-check INT'L / MY sheets: never let a return AWB pass as outbound.
+  // Cross-check INT'L / MY sheets: never let a return AWB pass as outbound,
+  // and collect every distinct shipment/return pairing (used both for that
+  // cross-check and as the source data for the "Fedex AWB number" Google
+  // Sheets paste output, which needs the RAW tracking identifiers — some
+  // historical rows use alphanumeric IDs like "RO900699383HK" — not the
+  // D365-export's strict 12-digit rule).
   const crossReq = ["shipping date","transaction id","outbound shipment number","return shipment number"];
+  const awbPairs = [];
+  const seenPairKeys = new Set();
   for(const sn of workbook.SheetNames){
     if(sn === sheetName) continue;
     const xaoa = XLSX.utils.sheet_to_json(workbook.Sheets[sn], {header:1, defval:""});
     const xHeaderIdx = d365fFindHeaderRow(xaoa, crossReq);
     if(xHeaderIdx < 0) continue;
     const xHeader = xaoa[xHeaderIdx];
-    const xCol = { shopifyRef: d365fColIndex(xHeader, ["transaction id"]), outbound: d365fColIndex(xHeader, ["outbound shipment number"]), ret: d365fColIndex(xHeader, ["return shipment number"]) };
+    const xCol = { shippingDate: d365fColIndex(xHeader, ["shipping date"]), shopifyRef: d365fColIndex(xHeader, ["transaction id"]), outbound: d365fColIndex(xHeader, ["outbound shipment number"]), ret: d365fColIndex(xHeader, ["return shipment number"]) };
     const byRef = {};
     for(let r=xHeaderIdx+1; r<xaoa.length; r++){
       const row = xaoa[r]||[];
       const ref = String(row[xCol.shopifyRef]||"").trim();
       if(!ref) continue;
-      byRef[ref] = { outboundAwb: d365fExtractAwb(row[xCol.outbound]), returnAwb: d365fExtractAwb(row[xCol.ret]) };
+      const outboundStrict = d365fExtractAwb(row[xCol.outbound]);
+      const returnStrict = d365fExtractAwb(row[xCol.ret]);
+      byRef[ref] = { outboundAwb: outboundStrict, returnAwb: returnStrict };
+      // Lenient extraction for the paste output: preserve any historical
+      // alphanumeric identifier verbatim rather than discarding it for not
+      // being 12 digits.
+      const shipDate = d365fParseFedexDate(row[xCol.shippingDate]);
+      const outboundLenient = d365fExtractTrackingLenient(row[xCol.outbound]);
+      const returnLenient = d365fExtractTrackingLenient(row[xCol.ret]);
+      const pairIssues = [];
+      if(!returnLenient) pairIssues.push("No return waybill found for this shipment");
+      if(!shipDate) pairIssues.push(`Could not parse shipping date "${row[xCol.shippingDate]}" on sheet "${sn}"`);
+      const pairKey = `${shipDate?d365fFormatDateForD365(shipDate):""}|${ref}|${outboundLenient||""}|${returnLenient||""}`;
+      if(!seenPairKeys.has(pairKey)){
+        seenPairKeys.add(pairKey);
+        awbPairs.push({ shippingDate: shipDate, shopifyRef: ref, outboundTracking: outboundLenient, returnTracking: returnLenient, sourceSheet: sn, sourceRow: r+1, issues: pairIssues });
+      }
     }
     for(const kit of kits){
       const x = byRef[kit.shopifyRef];
@@ -1292,7 +1348,17 @@ function d365fParseFedexReport(workbook){
       else if(x.outboundAwb && kit.awb !== x.outboundAwb) kit.issues.push(`AWB doesn't match sheet "${sn}"'s outbound tracking (${x.outboundAwb}) for this order — cross-check before dispatch`);
     }
   }
-  return { kits, issues };
+  // Cross-check the paste output's own pairs against the Daily Report's AWB
+  // for the same order — surfaced as a warning, never silently overridden.
+  const dailyAwbByRef = {};
+  for(const kit of kits) if(kit.shopifyRef && kit.awb) dailyAwbByRef[kit.shopifyRef] = kit.awb;
+  for(const pair of awbPairs){
+    const dailyAwb = dailyAwbByRef[pair.shopifyRef];
+    if(dailyAwb && pair.outboundTracking && dailyAwb !== pair.outboundTracking){
+      pair.issues.push(`Outbound tracking differs from the Daily Report's AWB for this order (Daily Report: ${dailyAwb})`);
+    }
+  }
+  return { kits, issues, awbPairs };
 }
 
 /* ---- Job Order Excel parsing (matches this tool's own export format) ---- */
@@ -1472,7 +1538,7 @@ function d365fJoinSfReports(outboundRows, snRows){
       for(const s of g.snRecords){
         kits.push({
           shopifyRef: s.erpRef, outboundOrderId: s.outboundOrderId, wmsOrderId: s.wmsOrderId, awb: s.awb,
-          returnWaybill: null, productDescription: s.productDescription, serial: s.serial,
+          returnWaybill: null, productDescription: s.productDescription, sfProductLabel: s.sku, serial: s.serial,
           shippingDate: null, shippingDateText: null, sourceSheet: s.sourceSheet, sourceRow: s.sourceRow,
           issues: [`No matching Outbound report line for this SN record (出库单号/运单号/SKU: ${key})`]
         });
@@ -1504,7 +1570,7 @@ function d365fJoinSfReports(outboundRows, snRows){
     if(!distinctSerials.length){
       kits.push({
         shopifyRef: ref.erpRef, outboundOrderId: ref.outboundOrderId, wmsOrderId: ref.wmsOrderId, awb: ref.awb,
-        returnWaybill: ref.returnWaybill, productDescription: ref.productDescription, serial: null,
+        returnWaybill: ref.returnWaybill, productDescription: ref.productDescription, sfProductLabel: ref.sku, serial: null,
         shippingDate: ref.shippingDate, shippingDateText: ref.shippingDateText, sourceSheet: ref.sourceSheet, sourceRow: ref.sourceRow,
         issues: [...groupIssues, "No serial numbers found in SN report for this shipment/SKU group"]
       });
@@ -1513,7 +1579,7 @@ function d365fJoinSfReports(outboundRows, snRows){
     for(const serial of distinctSerials){
       kits.push({
         shopifyRef: ref.erpRef, outboundOrderId: ref.outboundOrderId, wmsOrderId: ref.wmsOrderId, awb: ref.awb,
-        returnWaybill: ref.returnWaybill, productDescription: ref.productDescription, serial,
+        returnWaybill: ref.returnWaybill, productDescription: ref.productDescription, sfProductLabel: ref.sku, serial,
         shippingDate: ref.shippingDate, shippingDateText: ref.shippingDateText, sourceSheet: ref.sourceSheet, sourceRow: ref.sourceRow,
         issues: [...groupIssues]
       });
@@ -1569,8 +1635,17 @@ function d365fShipmentReferenceToSkuMap(){
 }
 function d365fRecomputeBatchIssue(row){
   row.issues = row.issues.filter(i=>!i.startsWith("No default or on-hand batch configured"));
+  row.batchIssues = (row.batchIssues||[]).filter(i=>!i.startsWith("No default or on-hand batch configured"));
   const hasOnhandIssue = row.issues.some(i=>i.startsWith("Multiple on-hand batches") || i.startsWith("On-hand report has no available"));
-  if(row.sku && !row.batch && !hasOnhandIssue) row.issues.push(`No default or on-hand batch configured for SKU "${row.sku}" — enter one manually`);
+  if(row.sku && !row.batch && !hasOnhandIssue){
+    const msg = `No default or on-hand batch configured for SKU "${row.sku}" — enter one manually`;
+    row.issues.push(msg);
+    row.batchIssues.push(msg);
+  }
+  // Batch problems never block the Google Sheets paste outputs, which
+  // carry no batch column at all — only the D365 workbook needs one.
+  row.coreIssues = row.issues.filter(i=>!row.batchIssues.includes(i));
+  row.pasteReady = row.coreIssues.length === 0;
 }
 function d365fMatchAndAssign(){
   const cfg = d365fCfg();
@@ -1611,6 +1686,11 @@ function d365fMatchAndAssign(){
         else issues.push(`Order "${resolvedRef}" has ${distinctSkus.length} different SKUs on the Job Order file (${distinctSkus.join(", ")}) and the product description "${kit.productDescription}" didn't resolve to one — pick the correct line manually`);
       }
     }
+    // Batch-assignment problems are tracked separately from matching/data
+    // problems: the D365 workbook needs a resolved batch, but the Google
+    // Sheets paste outputs (which carry no batch column at all) shouldn't
+    // be blocked just because a batch couldn't be picked yet.
+    const batchIssues = [];
     let batch = "", batchSource = "";
     if(sku){
       const preferredBatch = D365F.defaultBatches[carrier][sku] || null;
@@ -1620,8 +1700,8 @@ function d365fMatchAndAssign(){
         if(!pick){
           const eligible = onhandList.filter(b=>b.available>0);
           if(eligible.length === 1) pick = eligible[0];
-          else if(eligible.length > 1) issues.push(`Multiple on-hand batches could cover SKU "${sku}" (${eligible.map(b=>`${b.batch}:${b.available}`).join(", ")}) — pick one manually`);
-          else issues.push(`On-hand report has no available quantity left for SKU "${sku}" in ${cfg.legalEntity}/${cfg.warehouse}/Primary`);
+          else if(eligible.length > 1) batchIssues.push(`Multiple on-hand batches could cover SKU "${sku}" (${eligible.map(b=>`${b.batch}:${b.available}`).join(", ")}) — pick one manually`);
+          else batchIssues.push(`On-hand report has no available quantity left for SKU "${sku}" in ${cfg.legalEntity}/${cfg.warehouse}/Primary`);
         }
         if(pick){ batch = pick.batch; batchSource = "On-hand"; pick.available -= 1; }
       } else {
@@ -1629,6 +1709,7 @@ function d365fMatchAndAssign(){
         batchSource = batch ? "Default" : "";
       }
     }
+    issues.push(...batchIssues);
     const fingerprint = (kit.awb && kit.serial) ? `${kit.shopifyRef}|${kit.awb}|${kit.serial}` : null;
     const serialFingerprint = (resolvedRef && kit.serial) ? `${resolvedRef}|${kit.serial}` : null;
     if(fingerprint){
@@ -1639,11 +1720,12 @@ function d365fMatchAndAssign(){
     }
     const row = {
       carrier, rawRef: kit.shopifyRef, shopifyRef: resolvedRef || kit.shopifyRef, matchMethod, salesOrder, sku, matchNote,
-      shippingDateText: kit.shippingDateText, awb: kit.awb, serial: kit.serial, returnWaybill: kit.returnWaybill || null,
-      productDescription: kit.productDescription, warehouseLocation: cfg.warehouseLocation, batch, batchSource,
-      fingerprint, serialFingerprint, sourceSheet: kit.sourceSheet, sourceRow: kit.sourceRow, issues
+      shippingDate: kit.shippingDate, shippingDateText: kit.shippingDateText, awb: kit.awb, serial: kit.serial,
+      returnWaybill: kit.returnWaybill || null, productDescription: kit.productDescription, sfProductLabel: kit.sfProductLabel || null,
+      warehouseLocation: cfg.warehouseLocation, batch, batchSource,
+      fingerprint, serialFingerprint, sourceSheet: kit.sourceSheet, sourceRow: kit.sourceRow, issues, batchIssues
     };
-    if(sku) d365fRecomputeBatchIssue(row);
+    d365fRecomputeBatchIssue(row);
     return row;
   });
   D365F.matched = results;
@@ -1697,6 +1779,95 @@ function d365fComputeExportSet(){
     else toExport.push(...rows);
   }
   return { toExport, excludedOrders };
+}
+
+/* ---- Google Sheets paste outputs (data-prep only — never writes to the
+   sheet itself, just produces copy-ready TSV / a separate download
+   workbook for manual pasting). Built from the same matched/parsed
+   records as the D365 workbook, but with its own readiness rule: a
+   kit blocked only because of a BATCH problem still has valid data for
+   these outputs (which carry no batch column at all), so they use
+   `pasteReady`/`coreIssues` rather than the full `issues` list. ---- */
+const D365F_SHEETS_TABS = {
+  fedexOutbound: { name:"Outbound Report (FedEx)", sheetId:"1871460427", headers:["Date","EP Order ID / Shopify reference","D365 SO number","AWB","Product","Barcode"], dateCol:0 },
+  fedexAwb:      { name:"Fedex AWB number", sheetId:"1591713659", headers:["Date","Transaction ID","Outbound Shipment Number","Return Shipment Number"], dateCol:0 },
+  sfOutbound:    { name:"Outbound Report (SF)", sheetId:"282909799", headers:["EP Order ID / Shopify reference","D365 SO number","AWB","Barcode","Product","Shipped Date","Shopify fulfilment","Invoiced on D365?","Return Waybill"], dateCol:5 }
+};
+function d365fFedexOutboundRecords(){
+  return D365F.matched.filter(r=>r.carrier==="fedex" && r.pasteReady).map(r=>({
+    date: r.shippingDate, row: [r.shippingDate, r.shopifyRef, r.salesOrder, r.awb, r.productDescription, r.serial], issues: r.coreIssues
+  }));
+}
+function d365fFedexAwbRecords(){
+  return (D365F.fedexAwbPairs||[]).map(p=>({
+    date: p.shippingDate, row: [p.shippingDate, p.shopifyRef, p.outboundTracking||"", p.returnTracking||""], issues: p.issues
+  }));
+}
+function d365fSfOutboundRecords(){
+  return D365F.matched.filter(r=>r.carrier==="sf" && r.pasteReady).map(r=>({
+    date: r.shippingDate, row: [r.shopifyRef, r.salesOrder, r.awb, r.serial, r.sfProductLabel||r.productDescription, r.shippingDate, "", "", r.returnWaybill||""], issues: r.coreIssues
+  }));
+}
+const D365F_SHEETS_RECORD_FNS = { fedexOutbound: d365fFedexOutboundRecords, fedexAwb: d365fFedexAwbRecords, sfOutbound: d365fSfOutboundRecords };
+function d365fSheetsRecords(outputKey){ return D365F_SHEETS_RECORD_FNS[outputKey](); }
+function d365fTsvSafe(v){ return String(v==null?"":v).replace(/[\t\r\n]+/g," "); }
+function d365fRowToTsvCells(tab, row){
+  return row.map((v,i)=> i===tab.dateCol ? d365fFormatDateHuman(v) : d365fTsvSafe(v));
+}
+function d365fBuildTsv(outputKey, includeHeaders){
+  const tab = D365F_SHEETS_TABS[outputKey];
+  const records = d365fSheetsRecords(outputKey);
+  const lines = [];
+  if(includeHeaders) lines.push(tab.headers.map(d365fTsvSafe).join("\t"));
+  for(const rec of records) lines.push(d365fRowToTsvCells(tab, rec.row).join("\t"));
+  return { tsv: lines.join("\n"), rowCount: records.length };
+}
+async function d365fCopyToClipboard(text){
+  try{ await navigator.clipboard.writeText(text); return true; }
+  catch(e){
+    try{
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    }catch(e2){ return false; }
+  }
+}
+// The downloadable workbook uses genuine date cells (format "d mmm yyyy"),
+// unlike the clipboard TSV which uses literal "7 Oct 2026" text — Excel
+// dates don't survive a plain-text clipboard paste as dates reliably, so
+// the two paths intentionally diverge here.
+function d365fBuildSheetsWorkbook(outputKeys){
+  const wb = XLSX.utils.book_new();
+  for(const key of outputKeys){
+    const tab = D365F_SHEETS_TABS[key];
+    const records = d365fSheetsRecords(key);
+    const aoa = [tab.headers, ...records.map(rec=>rec.row.map((v,i)=> i===tab.dateCol ? "" : v))];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    records.forEach((rec,i)=>{
+      const addr = XLSX.utils.encode_cell({ r:i+1, c:tab.dateCol });
+      if(rec.date){ ws[addr] = { t:"d", v:rec.date, z:"d mmm yyyy" }; }
+      else { ws[addr] = { t:"s", v:"" }; }
+    });
+    const ref = XLSX.utils.encode_range({ s:{r:0,c:0}, e:{r:aoa.length-1, c:tab.headers.length-1} });
+    ws["!ref"] = ref;
+    XLSX.utils.book_append_sheet(wb, ws, tab.name);
+  }
+  const wbout = XLSX.write(wb, {bookType:"xlsx", type:"array"});
+  return new Blob([wbout], {type:"application/octet-stream"});
+}
+function d365fLoadSheetsHistory(){
+  try{ return JSON.parse(localStorage.getItem("circledna_d365f_sheets_history")||"[]"); }
+  catch(e){ return []; }
+}
+function d365fSaveSheetsHistory(h){ localStorage.setItem("circledna_d365f_sheets_history", JSON.stringify(h)); }
+D365F.sheetsHistory = d365fLoadSheetsHistory();
+function d365fRecordSheetsAction(outputKey, action, rowCount){
+  D365F.sheetsHistory.push({ timestamp: Date.now(), carrier: D365F.carrier, outputKey, tabName: D365F_SHEETS_TABS[outputKey].name, action, rowCount, status: action });
+  d365fSaveSheetsHistory(D365F.sheetsHistory);
+  d365fRenderSheetsHistory();
 }
 
 /* ---- Rendering ---- */
@@ -1811,11 +1982,84 @@ function d365fRenderHistory(){
     toast(`Regenerated ${run.outputFilename}`);
   }));
 }
+function d365fSheetsOutputKeysForCarrier(){
+  return D365F.carrier === "sf" ? ["sfOutbound"] : ["fedexOutbound", "fedexAwb"];
+}
+function d365fUpdateSheetsPreview(outputKey){
+  const includeHeaders = document.querySelector(`[data-sheets-headers="${outputKey}"]`).checked;
+  const { tsv } = d365fBuildTsv(outputKey, includeHeaders);
+  document.querySelector(`[data-sheets-preview="${outputKey}"]`).value = tsv;
+}
+function d365fRenderSheetsCard(){
+  const card = document.getElementById("d365fSheetsCard");
+  if(!D365F.matched.length && !(D365F.fedexAwbPairs||[]).length){ card.style.display = "none"; return; }
+  card.style.display = "block";
+  const outputKeys = d365fSheetsOutputKeysForCarrier();
+  document.getElementById("d365fSheetsPanels").innerHTML = outputKeys.map(key=>{
+    const tab = D365F_SHEETS_TABS[key];
+    const records = d365fSheetsRecords(key);
+    const flagged = records.filter(r=>r.issues && r.issues.length);
+    const warningHtml = flagged.length
+      ? `<div style="margin-bottom:8px;">${flagged.slice(0,8).map(r=>`<span style="${TAG_STYLE}background:var(--status-urgent-bg);color:var(--status-urgent);">${r.issues[0]}</span>`).join("")}${flagged.length>8?`<span style="${TAG_STYLE}">+${flagged.length-8} more</span>`:""}</div>`
+      : "";
+    const sfNote = key==="sfOutbound"
+      ? `<div style="font-size:11px;color:var(--status-urgent);margin-bottom:8px;">For NEW rows only — columns G/H are left blank here, so pasting over already-populated rows will clear their existing Shopify fulfilment / Invoiced on D365 status.</div>`
+      : "";
+    return `<div style="border:1px solid var(--border-soft);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--bg-section);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:8px;">
+        <div style="font-weight:600;font-size:13.5px;color:var(--fg-heading);">${tab.name}</div>
+        <label style="font-size:11.5px;color:var(--fg2);display:flex;align-items:center;gap:4px;"><input type="checkbox" data-sheets-headers="${key}"> Include headers</label>
+      </div>
+      <div style="font-size:11.5px;color:var(--fg2);margin-bottom:8px;">Destination: tab "${tab.name}", starting at column A, ${tab.headers.length} column(s), ${records.length} row(s). Select column A of the next empty data row and paste values only.</div>
+      ${sfNote}${warningHtml}
+      <textarea readonly data-sheets-preview="${key}" style="width:100%;height:100px;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;resize:vertical;"></textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+        <button data-sheets-copy="${key}" style="${BTN_SMALL}background:var(--im8-red-algae);color:#fff;padding:8px 16px;">Copy for ${tab.name}</button>
+      </div>
+    </div>`;
+  }).join("");
+  outputKeys.forEach(key=>{
+    d365fUpdateSheetsPreview(key);
+    document.querySelector(`[data-sheets-headers="${key}"]`).addEventListener("change", ()=>d365fUpdateSheetsPreview(key));
+    document.querySelector(`[data-sheets-copy="${key}"]`).addEventListener("click", async ()=>{
+      const includeHeaders = document.querySelector(`[data-sheets-headers="${key}"]`).checked;
+      const { tsv, rowCount } = d365fBuildTsv(key, includeHeaders);
+      const ok = await d365fCopyToClipboard(tsv);
+      if(ok){ toast(`Copied ${rowCount} row(s) for ${D365F_SHEETS_TABS[key].name}`); d365fRecordSheetsAction(key, "copied", rowCount); }
+      else toast("Copy failed — select the text in the box and copy manually");
+    });
+  });
+  const totalRows = outputKeys.reduce((s,k)=>s+d365fSheetsRecords(k).length, 0);
+  const dlBtn = document.getElementById("btnD365fDownloadSheets");
+  dlBtn.disabled = totalRows===0; dlBtn.style.opacity = totalRows===0 ? "0.4" : "1";
+}
+function d365fRenderSheetsHistory(){
+  const tbody = document.querySelector("#d365fSheetsHistoryTable tbody");
+  document.querySelector("#d365fSheetsHistoryTable thead").innerHTML = `<tr><th style="${TABLE_TH}">When</th><th style="${TABLE_TH}">Carrier</th><th style="${TABLE_TH}">Tab</th><th style="${TABLE_TH}">Action</th><th style="${TABLE_TH}">Rows</th><th style="${TABLE_TH}">Status</th><th style="${TABLE_TH}"></th></tr>`;
+  if(!D365F.sheetsHistory.length){ tbody.innerHTML = `<tr><td style="${TABLE_TD}" colspan="7">No actions yet.</td></tr>`; return; }
+  tbody.innerHTML = [...D365F.sheetsHistory].reverse().map(entry=>{
+    const idx = D365F.sheetsHistory.indexOf(entry);
+    return `<tr>
+      <td style="${TABLE_TD_NOWRAP}">${new Date(entry.timestamp).toLocaleString()}</td>
+      <td style="${TABLE_TD_NOWRAP}">${D365F_CARRIER_CONFIG[entry.carrier]?.label||entry.carrier}</td>
+      <td style="${TABLE_TD}">${entry.tabName}</td><td style="${TABLE_TD}">${entry.action}</td><td style="${TABLE_TD}">${entry.rowCount}</td>
+      <td style="${TABLE_TD}">${entry.status}</td>
+      <td style="${TABLE_TD}">${entry.status!=="pasted"?`<button data-sheets-hist-pasted="${idx}" style="${BTN_SMALL}background:var(--status-ready);color:#fff;">Mark pasted</button>`:""}</td>
+    </tr>`;
+  }).join("");
+  tbody.querySelectorAll("[data-sheets-hist-pasted]").forEach(b=>b.addEventListener("click", ()=>{
+    D365F.sheetsHistory[Number(b.dataset.sheetsHistPasted)].status = "pasted";
+    d365fSaveSheetsHistory(D365F.sheetsHistory);
+    d365fRenderSheetsHistory();
+  }));
+}
 function d365fRenderAll(){
   d365fRenderBatchDefaults();
   d365fRenderSummary();
   d365fRenderTable();
   d365fRenderExportCard();
+  d365fRenderSheetsCard();
+  d365fRenderSheetsHistory();
   d365fRenderHistory();
 }
 function d365fRecordRun(records, filename){
@@ -2143,7 +2387,7 @@ function d365fStatusLine(){
 function d365fSwitchCarrier(carrier){
   D365F.carrier = carrier;
   D365F.kits = []; D365F.parseIssues = []; D365F.matched = [];
-  D365F.sfOutboundRows = null; D365F.sfSnRows = null;
+  D365F.sfOutboundRows = null; D365F.sfSnRows = null; D365F.fedexAwbPairs = null;
   d365fUploaded.fedex = null; d365fUploaded.sfoutbound = null; d365fUploaded.sfsn = null;
   document.getElementById("wrap-fxreport").style.display = carrier==="fedex" ? "" : "none";
   document.getElementById("wrap-sfoutbound").style.display = carrier==="sf" ? "" : "none";
@@ -2170,8 +2414,8 @@ wireDropzone("dz-fxreport","file-fxreport", files=>{
   reader.onload = e=>{
     try{
       const wb = XLSX.read(e.target.result, {type:"array"});
-      const { kits, issues } = d365fParseFedexReport(wb);
-      D365F.kits = kits; D365F.parseIssues = issues;
+      const { kits, issues, awbPairs } = d365fParseFedexReport(wb);
+      D365F.kits = kits; D365F.parseIssues = issues; D365F.fedexAwbPairs = awbPairs;
       d365fUploaded.fedex = file;
       markFilled("dz-fxreport","fname-fxreport",file.name);
       d365fStatusLine(); d365fCheckReady();
@@ -2278,6 +2522,21 @@ document.getElementById("btnD365fDownload").addEventListener("click", ()=>{
   d365fRecordRun(toExport, filename);
   d365fRenderAll();
   toast(`Generated ${filename} — import it in D365, then mark it confirmed below`);
+});
+document.getElementById("btnD365fDownloadSheets").addEventListener("click", ()=>{
+  const outputKeys = d365fSheetsOutputKeysForCarrier();
+  const totalRows = outputKeys.reduce((s,k)=>s+d365fSheetsRecords(k).length, 0);
+  if(!totalRows) return;
+  const stamp = new Date().toISOString().slice(0,10);
+  const carrierTag = D365F.carrier==="sf" ? "SF" : "FedEx";
+  const filename = `GoogleSheets_Paste_${carrierTag}_${stamp}.xlsx`;
+  const blob = d365fBuildSheetsWorkbook(outputKeys);
+  download(filename, blob);
+  outputKeys.forEach(key=>{
+    const n = d365fSheetsRecords(key).length;
+    if(n) d365fRecordSheetsAction(key, "downloaded", n);
+  });
+  toast(`Generated ${filename}`);
 });
 
 document.getElementById("processingDate").value = new Date().toISOString().slice(0,10);
