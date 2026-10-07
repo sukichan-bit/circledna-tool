@@ -1161,11 +1161,6 @@ function d365fLoadDefaultBatches(){
   }catch(e){ return { fedex:{}, sf:{} }; }
 }
 function d365fSaveDefaultBatches(m){ localStorage.setItem("circledna_d365f_default_batches", JSON.stringify(m)); }
-function d365fLoadConfirmedAliases(){
-  try{ return JSON.parse(localStorage.getItem("circledna_d365f_confirmed_aliases")||"{}"); }
-  catch(e){ return {}; }
-}
-function d365fSaveConfirmedAliases(m){ localStorage.setItem("circledna_d365f_confirmed_aliases", JSON.stringify(m)); }
 function d365fGetHistory(){
   try{ return JSON.parse(localStorage.getItem("circledna_d365f_history")||"[]"); }
   catch(e){ return []; }
@@ -1180,7 +1175,6 @@ let D365F = {
   onHand: null,
   matched: [],
   defaultBatches: d365fLoadDefaultBatches(),
-  confirmedAliases: d365fLoadConfirmedAliases(),
   history: [],
   runSeq: 0
 };
@@ -1339,18 +1333,15 @@ function d365fParseJobOrder(workbook){
   return { index, needsMapping: null };
 }
 // Resolves a raw order reference to Job Order candidates. SF's ERP reference
-// sometimes carries a "-re" suffix (e.g. "DNA-15656-re") that may or may not
-// denote the same underlying order as the base Shopify reference — never
-// strip it silently. Exact match first; then a previously-confirmed alias
-// (persisted so the operator isn't asked twice for a recurring pattern);
-// then, only as an unconfirmed suggestion the UI must surface for review.
+// always carries a trailing "-re" relative to the actual Shopify reference
+// (e.g. "DNA-15656-re" for Shopify order "DNA-15656") — confirmed as a
+// standing format rule, not a per-order guess, so it's stripped
+// automatically here rather than requiring manual confirmation every run.
 function d365fLookupJobOrder(rawRef, jobOrderIndex){
   if(!jobOrderIndex) return { candidates: null, resolvedRef: null, method: "no-job-order-file" };
   if(jobOrderIndex.has(rawRef)) return { candidates: jobOrderIndex.get(rawRef), resolvedRef: rawRef, method: "exact" };
-  const confirmed = D365F.confirmedAliases[rawRef];
-  if(confirmed && jobOrderIndex.has(confirmed)) return { candidates: jobOrderIndex.get(confirmed), resolvedRef: confirmed, method: "confirmed-alias" };
   const m = rawRef.match(/^(.*)-re$/i);
-  if(m && jobOrderIndex.has(m[1])) return { candidates: null, resolvedRef: m[1], method: "alias-candidate-unconfirmed" };
+  if(m && jobOrderIndex.has(m[1])) return { candidates: jobOrderIndex.get(m[1]), resolvedRef: m[1], method: "re-suffix-stripped" };
   return { candidates: null, resolvedRef: null, method: "none" };
 }
 
@@ -1606,8 +1597,6 @@ function d365fMatchAndAssign(){
     let resolvedRef = lookup.resolvedRef, matchMethod = lookup.method;
     if(matchMethod === "no-job-order-file"){
       issues.push("Job Order file not loaded yet");
-    } else if(matchMethod === "alias-candidate-unconfirmed"){
-      issues.push(`No exact Job Order match for "${kit.shopifyRef}", but a record exists for "${lookup.resolvedRef}" (stripping a trailing "-re") — confirm this is the same order before it can export`);
     } else if(matchMethod === "none"){
       issues.push(`No matching Job Order record for reference "${kit.shopifyRef}"`);
     } else {
@@ -1659,12 +1648,6 @@ function d365fMatchAndAssign(){
   });
   D365F.matched = results;
   return results;
-}
-function d365fConfirmAlias(rawRef, resolvedRef){
-  D365F.confirmedAliases[rawRef] = resolvedRef;
-  d365fSaveConfirmedAliases(D365F.confirmedAliases);
-  d365fMatchAndAssign();
-  d365fRenderAll();
 }
 
 /* ---- Export (template-exact workbook) ---- */
@@ -1766,9 +1749,9 @@ function d365fRenderTable(){
   thead.innerHTML = `<tr><th style="${TABLE_TH}">Raw ref</th><th style="${TABLE_TH}">D365 order</th><th style="${TABLE_TH}">SKU</th><th style="${TABLE_TH}">Ship date</th><th style="${TABLE_TH}">AWB</th>${isSf?`<th style="${TABLE_TH}">Return waybill</th>`:""}<th style="${TABLE_TH}">Serial</th><th style="${TABLE_TH}">Batch</th><th style="${TABLE_TH}">Source</th><th style="${TABLE_TH}">Status</th></tr>`;
   tbody.innerHTML = D365F.matched.map((r,i)=>{
     const ok = r.issues.length===0;
-    const refCell = r.matchMethod==="alias-candidate-unconfirmed"
-      ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">→ ${r.shopifyRef}? <button data-confirm-alias="${i}" style="${BTN_SMALL}padding:2px 8px;background:var(--im8-red-algae);color:#fff;">Confirm alias</button></span>`
-      : (r.matchMethod==="confirmed-alias" ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">= ${r.shopifyRef} (confirmed)</span>` : r.shopifyRef);
+    const refCell = r.matchMethod==="re-suffix-stripped"
+      ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">= ${r.shopifyRef} (trailing "-re" stripped)</span>`
+      : r.shopifyRef;
     return `<tr>
       <td style="${TABLE_TD}">${refCell}</td><td style="${TABLE_TD_NOWRAP}">${r.salesOrder||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.sku||"—"}</td>
       <td style="${TABLE_TD_NOWRAP}">${r.shippingDateText||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.awb||"—"}</td>
@@ -1786,12 +1769,6 @@ function d365fRenderTable(){
       row.batchSource = row.batch ? "Manual" : "";
       d365fRecomputeBatchIssue(row);
       d365fRenderAll();
-    });
-  });
-  document.querySelectorAll("[data-confirm-alias]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{
-      const row = D365F.matched[Number(btn.dataset.confirmAlias)];
-      d365fConfirmAlias(row.rawRef, row.shopifyRef);
     });
   });
 }
