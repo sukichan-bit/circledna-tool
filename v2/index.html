@@ -1673,22 +1673,41 @@ function d365fMatchAndAssign(){
   const results = D365F.kits.map(kit=>{
     const issues = [...kit.issues];
     let salesOrder = null, sku = null, matchNote = "";
-    const lookup = d365fLookupJobOrder(kit.shopifyRef, D365F.jobOrderIndex);
-    let resolvedRef = lookup.resolvedRef, matchMethod = lookup.method;
-    if(matchMethod === "no-job-order-file"){
-      issues.push("Job Order file not loaded yet");
-    } else if(matchMethod === "none"){
-      issues.push(`No matching Job Order record for reference "${kit.shopifyRef}"`);
+    const rawRef = String(kit.shopifyRef||"").trim();
+    // Gifting orders for KOLs are placed directly in D365 — the FedEx
+    // report's Transaction ID is already the D365 order number itself
+    // (e.g. "H001-SO-158095"), never a Shopify "DNA-..." reference, so
+    // there's no Job Order line to match against and none is needed. A
+    // trailing "_<n>" split-shipment suffix (same as the DNA-... case,
+    // if a gift order itself exceeds 4 kits) is stripped the same way.
+    const directD365Match = rawRef.match(/^([A-Za-z]\d{3}-SO-\d+)(?:_\d+)?$/);
+    const isDirectD365Order = !!directD365Match;
+    let resolvedRef, matchMethod;
+    if(isDirectD365Order){
+      resolvedRef = directD365Match[1]; matchMethod = "direct-d365-order";
+      salesOrder = resolvedRef;
+      const resolvedSku = refToSku[kit.productDescription];
+      if(resolvedSku) sku = resolvedSku;
+      else issues.push(`Gift order "${rawRef}" — could not resolve a SKU from product description "${kit.productDescription}"`);
+      matchNote = "Gift order: D365 order number used directly, no Job Order match needed";
     } else {
-      const candidates = lookup.candidates;
-      const distinctSkus = [...new Set(candidates.map(c=>c.sku))];
-      if(distinctSkus.length === 1){
-        salesOrder = candidates[0].salesOrder; sku = distinctSkus[0];
+      const lookup = d365fLookupJobOrder(rawRef, D365F.jobOrderIndex);
+      resolvedRef = lookup.resolvedRef; matchMethod = lookup.method;
+      if(matchMethod === "no-job-order-file"){
+        issues.push("Job Order file not loaded yet");
+      } else if(matchMethod === "none"){
+        issues.push(`No matching Job Order record for reference "${rawRef}"`);
       } else {
-        const resolvedSku = refToSku[kit.productDescription];
-        const match = resolvedSku ? candidates.find(c=>c.sku===resolvedSku) : null;
-        if(match){ salesOrder = match.salesOrder; sku = match.sku; matchNote = `Resolved from ${distinctSkus.length} candidate SKUs via product description "${kit.productDescription}"`; }
-        else issues.push(`Order "${resolvedRef}" has ${distinctSkus.length} different SKUs on the Job Order file (${distinctSkus.join(", ")}) and the product description "${kit.productDescription}" didn't resolve to one — pick the correct line manually`);
+        const candidates = lookup.candidates;
+        const distinctSkus = [...new Set(candidates.map(c=>c.sku))];
+        if(distinctSkus.length === 1){
+          salesOrder = candidates[0].salesOrder; sku = distinctSkus[0];
+        } else {
+          const resolvedSku = refToSku[kit.productDescription];
+          const match = resolvedSku ? candidates.find(c=>c.sku===resolvedSku) : null;
+          if(match){ salesOrder = match.salesOrder; sku = match.sku; matchNote = `Resolved from ${distinctSkus.length} candidate SKUs via product description "${kit.productDescription}"`; }
+          else issues.push(`Order "${resolvedRef}" has ${distinctSkus.length} different SKUs on the Job Order file (${distinctSkus.join(", ")}) and the product description "${kit.productDescription}" didn't resolve to one — pick the correct line manually`);
+        }
       }
     }
     // Batch-assignment problems are tracked separately from matching/data
@@ -1715,7 +1734,7 @@ function d365fMatchAndAssign(){
       }
     }
     issues.push(...batchIssues);
-    const fingerprint = (kit.awb && kit.serial) ? `${kit.shopifyRef}|${kit.awb}|${kit.serial}` : null;
+    const fingerprint = (kit.awb && kit.serial) ? `${rawRef}|${kit.awb}|${kit.serial}` : null;
     const serialFingerprint = (resolvedRef && kit.serial) ? `${resolvedRef}|${kit.serial}` : null;
     if(fingerprint){
       if(seenFingerprints.has(fingerprint)) issues.push("Duplicate kit record within this upload (same order + AWB + serial appears more than once)");
@@ -1724,7 +1743,7 @@ function d365fMatchAndAssign(){
       else if(serialFingerprint && historySerials.has(serialFingerprint)) issues.push("This serial was already marked Import confirmed on this order under a different AWB/carrier — refusing to fulfill the same kit twice");
     }
     const row = {
-      carrier, rawRef: kit.shopifyRef, shopifyRef: resolvedRef || kit.shopifyRef, matchMethod, salesOrder, sku, matchNote,
+      carrier, rawRef, shopifyRef: resolvedRef || rawRef, isDirectD365Order, matchMethod, salesOrder, sku, matchNote,
       shippingDate: kit.shippingDate, shippingDateText: kit.shippingDateText, awb: kit.awb, serial: kit.serial,
       returnWaybill: kit.returnWaybill || null, productDescription: kit.productDescription, sfProductLabel: kit.sfProductLabel || null,
       warehouseLocation: cfg.warehouseLocation, batch, batchSource,
@@ -1819,8 +1838,11 @@ const D365F_SHEETS_TABS = {
   sfOutbound:    { name:"Outbound Report (SF)", sheetId:"282909799", headers:["EP Order ID / Shopify reference","D365 SO number","AWB","Barcode","Product","Shipped Date","Shopify fulfilment","Invoiced on D365?","Return Waybill"], dateCol:5 }
 };
 function d365fFedexOutboundRecords(){
+  // Gift orders have no real Shopify reference at all (the D365 order
+  // number IS the Transaction ID) — column B is left blank for them
+  // rather than showing the D365 order number twice.
   return D365F.matched.filter(r=>r.carrier==="fedex" && r.pasteReady).map(r=>({
-    date: r.shippingDate, row: [r.shippingDate, r.shopifyRef, r.salesOrder, r.awb, r.productDescription, r.serial], issues: r.coreIssues
+    date: r.shippingDate, row: [r.shippingDate, r.isDirectD365Order ? "" : r.shopifyRef, r.salesOrder, r.awb, r.productDescription, r.serial], issues: r.coreIssues
   }));
 }
 function d365fFedexAwbRecords(){
@@ -1933,8 +1955,13 @@ function d365fRenderSummary(){
   const kits = D365F.matched.length;
   const ready = D365F.matched.filter(r=>r.issues.length===0).length;
   const blocked = kits - ready;
-  const stats = [["Orders", orders], ["Kits shipped", kits], ["Ready", ready], ["Needs attention", blocked]];
-  document.getElementById("d365fSummaryStats").innerHTML = stats.map(([label,val])=>`<div style="${STAT_CARD}"><div style="font-size:11px;color:var(--fg2);text-transform:uppercase;letter-spacing:var(--track-micro);margin-bottom:4px;">${label}</div><div style="font-size:22px;font-family:var(--font-display);color:var(--fg-heading);">${val}</div></div>`).join("");
+  const stats = [
+    ["Orders", orders, STAT_CARD, "var(--fg-heading)"],
+    ["Kits shipped", kits, STAT_CARD, "var(--fg-heading)"],
+    ["Ready", ready, "background:var(--status-ready-bg);border:1px solid var(--border-soft);border-radius:12px;padding:14px 16px;", "var(--status-ready)"],
+    ["Needs attention", blocked, "background:var(--status-urgent-bg);border:1px solid var(--border-soft);border-radius:12px;padding:14px 16px;", "var(--status-urgent)"]
+  ];
+  document.getElementById("d365fSummaryStats").innerHTML = stats.map(([label,val,cardStyle,valColor])=>`<div style="${cardStyle}"><div style="font-size:11px;color:var(--fg2);text-transform:uppercase;letter-spacing:var(--track-micro);margin-bottom:4px;">${label}</div><div style="font-size:22px;font-family:var(--font-display);color:${valColor};">${val}</div></div>`).join("");
 }
 function d365fRenderTable(){
   const card = document.getElementById("d365fReviewCard");
