@@ -200,9 +200,10 @@
         <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Generate D365 Fulfillment File</h2>
         <div style="color:var(--fg2);font-size:13px;margin-bottom:4px;">Converts a carrier's daily shipment report(s) into a D365 import workbook (tracking, serials, batch). This is a separate workflow from the main Upload → Review → Resolve → Export pipeline above — nothing here touches it.</div>
         <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">Generating a file never marks an order fulfilled, picked, or packed in D365 — that still happens when you actually import it.</div>
-        <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
           <button id="btnCarrierFedex" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:8px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">FedEx (H001/OPS-WH07)</button>
           <button id="btnCarrierSf" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:8px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">SF Express (H001/OPS-WH06)</button>
+          <button id="btnCarrierManual" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:8px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Manual (H001/OPS-WH01)</button>
         </div>
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
           <div id="wrap-fxreport" style="flex:1;min-width:240px;">
@@ -243,8 +244,73 @@
           </div>
         </div>
         <div id="d365fStatus" style="margin-top:14px;color:var(--fg2);font-size:13px;white-space:pre-line;"></div>
-        <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+        <div id="wrap-matchbtn" style="display:flex;justify-content:flex-end;margin-top:16px;">
           <button id="btnD365fProcess" disabled style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:11px 22px;font-size:13px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);opacity:0.4;">Match orders</button>
+        </div>
+      </div>
+
+      <div id="d365fManualCard" style="display:none;background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);">
+        <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Manual shipments — Own Warehouse (OPS-WH01)</h2>
+        <div style="color:var(--status-urgent);font-size:12.5px;margin-bottom:4px;font-weight:600;">⚠ Warehouse location "Prenetics~OPS-WH01~Primary" has NOT been confirmed in D365 — verify before relying on generated files.</div>
+        <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">These rows don't come from a warehouse report — they're manual shipments identified by remarks like "AU-OPS01", "NZ-OPS01", or "for &lt;name&gt; (HK)" in your own Outbound Report (FedEx) tab. Paste or upload the source rows, then explicitly pick which ones actually shipped from your own warehouse. Set a default batch per SKU below (like FedEx/SF) and edit individual rows in Review if one batch isn't available for all of them.</div>
+
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <button id="btnManualInputPaste" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:7px 16px;font-size:12px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Paste rows</button>
+          <button id="btnManualInputUpload" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:7px 16px;font-size:12px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Upload spreadsheet</button>
+        </div>
+
+        <div id="manualPastePanel">
+          <div style="margin-bottom:10px;">
+            <label style="display:block;font-size:12.5px;font-weight:600;color:var(--fg-heading);margin-bottom:4px;">Paste "Outbound Report (FedEx)" rows (columns A:I)</label>
+            <textarea id="manualPasteOutbound" rows="5" placeholder="Paste tab-separated rows here, e.g. copied straight from the Google Sheet" style="width:100%;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;resize:vertical;"></textarea>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteOutboundHeaders"> First pasted row is the header row</label>
+          </div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button id="btnManualLoadPaste" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Load pasted rows</button>
+          </div>
+        </div>
+
+        <div id="manualUploadPanel" style="display:none;">
+          <div id="dz-manualupload" style="border:2px dashed var(--border-strong);border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:var(--bg-section);margin-bottom:12px;">
+            <input type="file" id="file-manualupload" accept=".xlsx,.xls" style="display:none;">
+            <div style="font-family:var(--font-sans);font-size:13.5px;font-weight:600;color:var(--fg-heading);">Job Orders spreadsheet copy (.xlsx)</div>
+            <div id="fname-manualupload" style="margin-top:6px;font-size:12.5px;color:var(--fg2);">Click or drop a downloaded copy with the "Outbound Report (FedEx)" tab</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px;">
+            <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Date from</label><input type="text" id="manualFilterDateFrom" placeholder="YYYY-MM-DD" style="width:100%;font-family:var(--font-sans);font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+            <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Date to</label><input type="text" id="manualFilterDateTo" placeholder="YYYY-MM-DD" style="width:100%;font-family:var(--font-sans);font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+            <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Order/reference contains</label><input type="text" id="manualFilterRef" style="width:100%;font-family:var(--font-sans);font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+            <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Remarks contains</label><input type="text" id="manualFilterRemarks" style="width:100%;font-family:var(--font-sans);font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button id="btnManualLoadUpload" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Apply filters &amp; load rows</button>
+          </div>
+        </div>
+
+        <div id="manualOrderLineWrap" style="margin-top:16px;border-top:1px solid var(--border-soft);padding-top:14px;">
+          <div id="dz-manualorderlines" style="border:2px dashed var(--border-strong);border-radius:12px;padding:16px;text-align:center;cursor:pointer;background:var(--bg-section);">
+            <input type="file" id="file-manualorderlines" accept=".xlsx,.xls" style="display:none;">
+            <div style="font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--fg-heading);">D365 sales-order-line export (optional)</div>
+            <div id="fname-manualorderlines" style="margin-top:4px;font-size:12px;color:var(--fg2);">For manual orders missing from the Job Order file — click or drop file</div>
+            <div style="margin-top:4px;font-size:11px;color:var(--fg2);">No sample seen yet — columns are guessed by name (Sales order / Item number). Verify before trusting.</div>
+          </div>
+        </div>
+
+        <div id="manualCandidatesWrap" style="display:none;margin-top:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+            <div style="font-size:12.5px;color:var(--fg2);" id="manualCandidatesCaption"></div>
+            <div style="display:flex;gap:6px;">
+              <button id="btnManualSelectSuggested" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:6px 12px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:var(--font-sans);">Select suggested</button>
+              <button id="btnManualSelectAll" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:6px 12px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:var(--font-sans);">Select all</button>
+              <button id="btnManualSelectNone" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:6px 12px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:var(--font-sans);">Select none</button>
+            </div>
+          </div>
+          <div style="max-height:360px;overflow:auto;border:1px solid var(--border-soft);border-radius:10px;">
+            <table id="manualCandidatesTable" style="border-collapse:collapse;width:100%;font-size:12px;font-family:var(--font-sans);"><thead></thead><tbody></tbody></table>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+            <button id="btnManualProcessSelected" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:11px 22px;font-size:13px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Process selected rows</button>
+          </div>
         </div>
       </div>
 
@@ -368,6 +434,18 @@ const DEFAULT_CONFIG = {
     "PRE-FG-000021": "Circle Exome Premium",
     "PRE-FG-000107": "Circle Exome Vital (V2)",
     "PRE-FG-000018": "Circle Premium BDM full kit"
+  },
+  // Manual (Own Warehouse) mode's own-warehouse Outbound Report free-text
+  // "Product" column, matched exactly — a separate table from
+  // skuToShipmentReference (which drives FedEx's own column text) because
+  // this one needs several description variants per SKU, confirmed by the
+  // user rather than guessed (e.g. the Employee variant has its own SKU,
+  // never assumed to share the standard Premium SKU).
+  productDescriptionToSku: {
+    "Circle Exome Premium": "PRE-FG-000021",
+    "Circle Exome Premium(JP)": "PRE-FG-000021",
+    "Circle Premium BDM full kit": "PRE-FG-000018",
+    "Circle Exome Premium (Employee)": "PRE-FG-000085"
   },
   // SKUs FedEx/SF don't hold inventory for. These orders keep their normal
   // country-based route (for classification/what-format-to-use) but never
@@ -1182,16 +1260,22 @@ function renderReviewTable(){
    above so it can't interfere with the daily pipeline.
    ====================================================================== */
 const D365F_CARRIER_CONFIG = {
-  fedex: { label:"FedEx", legalEntity:"H001", warehouse:"OPS-WH07", warehouseLocation:"Prenetics~OPS-WH07~Primary", defaultBatchForPremium:"fedex" },
-  sf:    { label:"SF Express", legalEntity:"H001", warehouse:"OPS-WH06", warehouseLocation:"Prenetics~OPS-WH06~Primary", defaultBatchForPremium:"OP001" }
+  fedex:  { label:"FedEx", legalEntity:"H001", warehouse:"OPS-WH07", warehouseLocation:"Prenetics~OPS-WH07~Primary", defaultBatchForPremium:"fedex" },
+  sf:     { label:"SF Express", legalEntity:"H001", warehouse:"OPS-WH06", warehouseLocation:"Prenetics~OPS-WH06~Primary", defaultBatchForPremium:"OP001" },
+  // Location string is a proposed-but-UNCONFIRMED value (same pattern as the
+  // other two warehouses) — user explicitly chose to proceed with it rather
+  // than block, on the condition it stays clearly flagged as unconfirmed
+  // wherever it's shown. No default batch at all: this mode requires a
+  // mandatory manual entry per kit, never inherited from FedEx/SF.
+  manual: { label:"Manual (Own Warehouse)", legalEntity:"H001", warehouse:"OPS-WH01", warehouseLocation:"Prenetics~OPS-WH01~Primary", defaultBatchForPremium:null, locationUnconfirmed:true }
 };
 function d365fCfg(){ return D365F_CARRIER_CONFIG[D365F.carrier]; }
 
 function d365fLoadDefaultBatches(){
   try{
     const raw = JSON.parse(localStorage.getItem("circledna_d365f_default_batches")||"{}");
-    return { fedex: raw.fedex||{}, sf: raw.sf||{} };
-  }catch(e){ return { fedex:{}, sf:{} }; }
+    return { fedex: raw.fedex||{}, sf: raw.sf||{}, manual: raw.manual||{} };
+  }catch(e){ return { fedex:{}, sf:{}, manual:{} }; }
 }
 function d365fSaveDefaultBatches(m){ localStorage.setItem("circledna_d365f_default_batches", JSON.stringify(m)); }
 function d365fGetHistory(){
@@ -1206,6 +1290,7 @@ let D365F = {
   sfOutboundRows: null, sfSnRows: null, fedexAwbPairs: null,
   jobOrderIndex: null, jobOrderNeedsMapping: null,
   onHand: null,
+  manualCandidates: [], manualOrderLineIndex: null, manualOrderLineNeedsMapping: null, manualSelected: new Set(),
   matched: [],
   defaultBatches: d365fLoadDefaultBatches(),
   history: [],
@@ -1276,6 +1361,44 @@ const D365F_MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep",
 function d365fFormatDateHuman(date){
   if(!date) return "";
   return `${date.getDate()} ${D365F_MONTH_ABBR[date.getMonth()]} ${date.getFullYear()}`;
+}
+// Manual mode's dates can arrive in any of the formats this tool itself
+// produces (the D365 M/D/YYYY text, or the Sheets-paste "7 Oct 2026" text)
+// or a genuine Excel date cell/serial, since the source is a downloaded or
+// pasted copy of our own Google Sheets paste output — never FedEx/SF's own
+// raw report formats.
+function d365fParseFlexibleDate(raw){
+  if(raw instanceof Date && !isNaN(raw)) return raw;
+  const s = String(raw||"").trim();
+  if(!s) return null;
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // M/D/YYYY
+  if(m){
+    const mm=Number(m[1]), dd=Number(m[2]), yy=Number(m[3]);
+    const d = new Date(yy, mm-1, dd);
+    if(mm>=1&&mm<=12&&d.getMonth()===mm-1&&d.getDate()===dd) return d;
+  }
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); // ISO YYYY-MM-DD
+  if(m){
+    const yy=Number(m[1]), mo=Number(m[2]), dd=Number(m[3]);
+    const d = new Date(yy, mo-1, dd);
+    if(mo>=1&&mo<=12&&d.getMonth()===mo-1&&d.getDate()===dd) return d;
+  }
+  m = s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/); // "7 Oct 2026" / "7 October 2026"
+  if(m){
+    const dd=Number(m[1]); const yy=Number(m[3]);
+    const mo = D365F_MONTH_ABBR.findIndex(ab=>m[2].toLowerCase().startsWith(ab.toLowerCase()));
+    if(mo>=0){ const d = new Date(yy, mo, dd); if(d.getMonth()===mo&&d.getDate()===dd) return d; }
+  }
+  if(/^\d+(\.\d+)?$/.test(s)){ // a raw Excel serial that survived as plain text
+    const n = Number(s);
+    if(n>20000 && n<80000) return new Date(Date.UTC(1899,11,30) + n*86400000);
+  }
+  return null;
+}
+// Splits pasted clipboard text into a grid exactly like XLSX.utils.sheet_to_json
+// would for a real sheet — rows on newlines, columns on tabs.
+function d365fParseTsvGrid(text){
+  return String(text||"").replace(/\r/g,"").split("\n").filter(l=>l.trim()!=="").map(line=>line.split("\t"));
 }
 function d365fParseFedexReport(workbook){
   const issues = [];
@@ -1611,6 +1734,71 @@ function d365fJoinSfReports(outboundRows, snRows){
   return kits;
 }
 
+/* ---- Manual mode (Own Warehouse, OPS-WH01): the source isn't a warehouse
+   report at all — it's the operator's own paste/upload of rows from this
+   tool's own "Outbound Report (FedEx)" Google Sheets tab, re-used here as
+   INPUT. Never assume a row belongs to OPS-WH01 just because it's being
+   reviewed here — the operator explicitly selects which rows actually
+   shipped from the own warehouse (see manual candidates UI). ---- */
+const D365F_MANUAL_OUTBOUND_HEADERS = ["date","ep order id / shopify reference","d365 so number","awb","product","barcode","shopify fulfilment","invoiced in d365?","special remarks"];
+// Remarks that SUGGEST (never conclusively prove) a row shipped from our
+// own warehouse — operator still has to tick the row explicitly.
+function d365fManualSuggested(remarks){
+  const r = String(remarks||"");
+  return /AU-OPS01/i.test(r) || /NZ-OPS01/i.test(r) || /for\s+.+\(HK\)/i.test(r);
+}
+function d365fMapManualOutboundRow(row, sourceRow){
+  const get = i => row[i]!==undefined ? String(row[i]).trim() : "";
+  const dateRaw = row[0], shopifyRef = get(1), d365Order = get(2), awbRaw = get(3), product = get(4), barcode = get(5), shopifyFulfilment = get(6), invoicedInD365 = get(7), remarks = get(8);
+  const shippingDate = d365fParseFlexibleDate(dateRaw);
+  const issues = [];
+  if(!shippingDate) issues.push(`Could not parse date "${dateRaw}"`);
+  if(!shopifyRef && !d365Order) issues.push("Row has neither a Shopify reference nor a D365 order number");
+  if(!awbRaw) issues.push("Missing AWB / dispatch reference (column D)");
+  if(!barcode) issues.push("Missing Barcode / serial (column F)");
+  return {
+    sourceRow, shippingDate, shippingDateText: shippingDate ? d365fFormatDateForD365(shippingDate) : null,
+    shopifyRef: shopifyRef || null, manualDirectOrder: d365Order || null, awb: awbRaw || null,
+    productDescription: product, serial: barcode || null,
+    shopifyFulfilment, invoicedInD365, remarks,
+    suggested: d365fManualSuggested(remarks),
+    invoiced: /^(y|yes|done|true|1)$/i.test(invoicedInD365.trim()),
+    manualSku: "", dispatchType: "",
+    issues
+  };
+}
+function d365fParseManualOutboundGrid(aoa, hasHeaders){
+  const startRow = hasHeaders ? 1 : 0;
+  const rows = [];
+  for(let r=startRow; r<aoa.length; r++){
+    const row = aoa[r]||[];
+    if(row.every(c=>String(c||"").trim()==="")) continue;
+    rows.push(d365fMapManualOutboundRow(row, r+1));
+  }
+  return rows;
+}
+// Optional D365 sales-order-line export, for SKUs on manual orders that
+// aren't in the morning Job Order file. No real sample has been seen, so
+// columns are guessed by name the same way as the on-hand report.
+function d365fParseManualOrderLines(workbook){
+  const sheetName = workbook.SheetNames[0];
+  const aoa = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {header:1, defval:""});
+  const required = ["sales order","item number"];
+  const headerIdx = d365fFindHeaderRow(aoa, required);
+  if(headerIdx < 0) return { index: null, needsMapping: { sheetName, headers: (aoa[0]||[]).map(h=>String(h||"").trim()).filter(Boolean) } };
+  const header = aoa[headerIdx];
+  const col = { salesOrder: d365fColIndex(header, ["sales order"]), sku: d365fColIndex(header, ["item number","sku"]), qty: d365fColIndex(header, ["quantity","qty"]) };
+  const index = new Map();
+  for(let r=headerIdx+1; r<aoa.length; r++){
+    const row = aoa[r]||[];
+    const salesOrder = String(row[col.salesOrder]||"").trim(), sku = String(row[col.sku]||"").trim();
+    if(!salesOrder || !sku) continue;
+    if(!index.has(salesOrder)) index.set(salesOrder, []);
+    index.get(salesOrder).push({ sku, quantity: col.qty>=0 ? Number(row[col.qty]||0) : null });
+  }
+  return { index, needsMapping: null };
+}
+
 /* ---- On-hand report: generic column mapping (no real sample calibrated yet) ---- */
 const D365F_ONHAND_FIELD_GUESSES = {
   sku: ["item number","sku","item"], batch: ["batch number","batch id","batch"],
@@ -1670,6 +1858,19 @@ function d365fRecomputeBatchIssue(row){
   row.coreIssues = row.issues.filter(i=>!row.batchIssues.includes(i));
   row.pasteReady = row.coreIssues.length === 0;
 }
+// Re-checks the two Manual-mode-only blocking conditions (missing SKU,
+// unclassified non-standard AWB) after an operator edits the SKU or
+// dispatch-type field directly in the review table.
+function d365fRecomputeManualIssues(row){
+  row.issues = row.issues.filter(i=>!i.startsWith("Could not resolve a SKU for order") && !i.includes("doesn't look like a standard tracking number"));
+  if(row.salesOrder && !row.sku){
+    row.issues.push(`Could not resolve a SKU for order "${row.salesOrder}" from the product description "${row.productDescription}" — enter the correct SKU manually`);
+  }
+  if(row.needsDispatchType && !row.dispatchType){
+    row.issues.push(`AWB/reference "${row.awb}" doesn't look like a standard tracking number — classify it (courier tracking / local delivery / collection / other dispatch reference) before relying on this row`);
+  }
+  d365fRecomputeBatchIssue(row);
+}
 function d365fMatchAndAssign(){
   const cfg = d365fCfg();
   const carrier = D365F.carrier;
@@ -1699,9 +1900,74 @@ function d365fMatchAndAssign(){
     // trailing "_<n>" split-shipment suffix (same as the DNA-... case,
     // if a gift order itself exceeds 4 kits) is stripped the same way.
     const directD365Match = rawRef.match(/^([A-Za-z]\d{3}-SO-\d+)(?:_\d+)?$/);
-    const isDirectD365Order = !!directD365Match;
+    const isDirectD365Order = !!directD365Match && carrier !== "manual";
     let resolvedRef, matchMethod;
-    if(isDirectD365Order){
+    let skuSource = "", dispatchType = kit.dispatchType || "", needsDispatchType = false;
+    if(carrier === "manual"){
+      // D365 order number (column C) is authoritative when present; Shopify
+      // reference (column B) is only used to RESOLVE an order when column C
+      // is blank. A present-but-blank Shopify ref must never block a valid
+      // D365-only order — see spec section "Match D365 orders and SKUs".
+      const colC = String(kit.manualDirectOrder||"").trim();
+      const colB = rawRef;
+      if(colC){
+        resolvedRef = colC; matchMethod = "manual-direct-order"; salesOrder = colC;
+        if(colB && D365F.jobOrderIndex){
+          const lookup = d365fLookupJobOrder(colB, D365F.jobOrderIndex);
+          if(lookup.method !== "none" && lookup.method !== "no-job-order-file"){
+            const candSOs = [...new Set(lookup.candidates.map(c=>c.salesOrder))];
+            if(candSOs.length && !candSOs.includes(colC)){
+              matchMethod = "manual-order-conflict";
+              issues.push(`D365 order "${colC}" and Shopify reference "${colB}" resolve to different orders (${candSOs.join(", ")}) — using the D365 order number`);
+            }
+          }
+        }
+      } else if(colB){
+        const lookup = d365fLookupJobOrder(colB, D365F.jobOrderIndex);
+        resolvedRef = lookup.resolvedRef; matchMethod = lookup.method;
+        if(matchMethod === "no-job-order-file"){
+          issues.push("Job Order file not loaded yet — cannot resolve Shopify reference to a D365 order");
+        } else if(matchMethod === "none"){
+          issues.push(`No matching Job Order record for reference "${colB}"`);
+        } else {
+          const distinctSOs = [...new Set(lookup.candidates.map(c=>c.salesOrder))];
+          if(distinctSOs.length === 1) salesOrder = distinctSOs[0];
+          else issues.push(`Shopify reference "${colB}" matches ${distinctSOs.length} different D365 orders on the Job Order file (${distinctSOs.join(", ")}) — enter the D365 order number manually`);
+        }
+      } else {
+        resolvedRef = ""; matchMethod = "none";
+        issues.push("Row has neither a D365 order number nor a Shopify reference");
+      }
+      // SKU resolution priority: Job Order data, then the optional D365
+      // sales-order-line export, then an exact match against the confirmed
+      // productDescriptionToSku table, then explicit manual entry. The
+      // productDescriptionToSku lookup is an exact-string config table the
+      // user has explicitly confirmed (including a distinct SKU for the
+      // "(Employee)" variant) — not a similarity guess, so it's safe to use
+      // here unlike inferring from product description would be.
+      if(salesOrder){
+        if(D365F.jobOrderIndex){
+          const joEntries = [...D365F.jobOrderIndex.values()].flat().filter(c=>c.salesOrder===salesOrder);
+          const distinctSkus = [...new Set(joEntries.map(c=>c.sku))];
+          if(distinctSkus.length === 1){ sku = distinctSkus[0]; skuSource = "Job Order file"; }
+          else if(distinctSkus.length > 1) issues.push(`Order "${salesOrder}" has ${distinctSkus.length} different SKUs on the Job Order file (${distinctSkus.join(", ")}) — enter the correct one manually`);
+        }
+        if(!sku && D365F.manualOrderLineIndex && D365F.manualOrderLineIndex.has(salesOrder)){
+          const lines = D365F.manualOrderLineIndex.get(salesOrder);
+          const distinctSkus = [...new Set(lines.map(l=>l.sku))];
+          if(distinctSkus.length === 1){ sku = distinctSkus[0]; skuSource = "D365 order-line export (unverified format)"; }
+          else if(distinctSkus.length > 1) issues.push(`Order "${salesOrder}" has ${distinctSkus.length} different SKUs on the uploaded order-line export (${distinctSkus.join(", ")}) — enter the correct one manually`);
+        }
+        if(!sku && CONFIG.productDescriptionToSku[kit.productDescription]){ sku = CONFIG.productDescriptionToSku[kit.productDescription]; skuSource = "Product description mapping"; }
+        if(!sku && kit.manualSku){ sku = kit.manualSku; skuSource = "Manual entry"; }
+        if(!sku) issues.push(`Could not resolve a SKU for order "${salesOrder}" from the product description "${kit.productDescription}" — enter the correct SKU manually`);
+      }
+      if(kit.awb && !/^\d{8,}$/.test(String(kit.awb).trim())){
+        needsDispatchType = true;
+        if(!dispatchType) issues.push(`AWB/reference "${kit.awb}" doesn't look like a standard tracking number — classify it (courier tracking / local delivery / collection / other dispatch reference) before relying on this row`);
+      }
+      if(kit.invoiced) matchNote = (matchNote?matchNote+"; ":"")+"⚠ This row shows Invoiced in D365 — selected deliberately; verify it isn't already fulfilled before exporting";
+    } else if(isDirectD365Order){
       resolvedRef = directD365Match[1]; matchMethod = "direct-d365-order";
       salesOrder = resolvedRef;
       const resolvedSku = refToSku[kit.productDescription];
@@ -1752,7 +2018,8 @@ function d365fMatchAndAssign(){
       }
     }
     issues.push(...batchIssues);
-    const fingerprint = (kit.awb && kit.serial) ? `${rawRef}|${kit.awb}|${kit.serial}` : null;
+    const dedupeRef = rawRef || resolvedRef || "";
+    const fingerprint = (dedupeRef && kit.awb && kit.serial) ? `${dedupeRef}|${kit.awb}|${kit.serial}` : null;
     const serialFingerprint = (resolvedRef && kit.serial) ? `${resolvedRef}|${kit.serial}` : null;
     if(fingerprint){
       if(seenFingerprints.has(fingerprint)) issues.push("Duplicate kit record within this upload (same order + AWB + serial appears more than once)");
@@ -1761,10 +2028,11 @@ function d365fMatchAndAssign(){
       else if(serialFingerprint && historySerials.has(serialFingerprint)) issues.push("This serial was already marked Import confirmed on this order under a different AWB/carrier — refusing to fulfill the same kit twice");
     }
     const row = {
-      carrier, rawRef, shopifyRef: resolvedRef || rawRef, isDirectD365Order, matchMethod, salesOrder, sku, matchNote,
+      carrier, rawRef, shopifyRef: resolvedRef || rawRef, isDirectD365Order, matchMethod, salesOrder, sku, skuSource, matchNote,
       shippingDate: kit.shippingDate, shippingDateText: kit.shippingDateText, awb: kit.awb, serial: kit.serial,
       returnWaybill: kit.returnWaybill || null, productDescription: kit.productDescription, sfProductLabel: kit.sfProductLabel || null,
-      warehouseLocation: cfg.warehouseLocation, batch, batchSource,
+      warehouseLocation: cfg.warehouseLocation, warehouseLocationUnconfirmed: !!cfg.locationUnconfirmed, batch, batchSource,
+      dispatchType, needsDispatchType, remarks: kit.remarks || null, invoiced: !!kit.invoiced,
       fingerprint, serialFingerprint, sourceSheet: kit.sourceSheet, sourceRow: kit.sourceRow, issues, batchIssues
     };
     d365fRecomputeBatchIssue(row);
@@ -1986,25 +2254,35 @@ function d365fRenderTable(){
   if(!D365F.matched.length){ card.style.display = "none"; return; }
   card.style.display = "block";
   const isSf = D365F.carrier === "sf";
+  const isManual = D365F.carrier === "manual";
+  const showReturnWaybill = isSf;
+  const DISPATCH_TYPES = ["", "Courier tracking", "Local delivery", "Collection", "Other dispatch reference"];
   const thead = document.querySelector("#d365fTable thead"), tbody = document.querySelector("#d365fTable tbody");
-  thead.innerHTML = `<tr><th style="${TABLE_TH}">Raw ref</th><th style="${TABLE_TH}">D365 order</th><th style="${TABLE_TH}">SKU</th><th style="${TABLE_TH}">Ship date</th><th style="${TABLE_TH}">AWB</th>${isSf?`<th style="${TABLE_TH}">Return waybill</th>`:""}<th style="${TABLE_TH}">Serial</th><th style="${TABLE_TH}">Batch</th><th style="${TABLE_TH}">Source</th><th style="${TABLE_TH}">Status</th></tr>`;
+  thead.innerHTML = `<tr><th style="${TABLE_TH}">Raw ref</th><th style="${TABLE_TH}">D365 order</th><th style="${TABLE_TH}">SKU</th><th style="${TABLE_TH}">Ship date</th><th style="${TABLE_TH}">AWB</th>${isManual?`<th style="${TABLE_TH}">Dispatch type</th>`:""}${showReturnWaybill?`<th style="${TABLE_TH}">Return waybill</th>`:""}<th style="${TABLE_TH}">Serial</th><th style="${TABLE_TH}">Batch</th><th style="${TABLE_TH}">Source</th>${isManual?`<th style="${TABLE_TH}">Remarks</th>`:""}<th style="${TABLE_TH}">Status</th></tr>`;
   tbody.innerHTML = D365F.matched.map((r,i)=>{
     const ok = r.issues.length===0;
     const refCell = r.matchMethod==="re-suffix-stripped"
       ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">= ${r.shopifyRef} (trailing "-re" stripped)</span>`
       : r.matchMethod==="split-suffix-stripped"
       ? `${r.rawRef}<br><span style="color:var(--fg2);font-size:11px;">= ${r.shopifyRef} (split-shipment suffix stripped)</span>`
+      : r.matchMethod==="manual-order-conflict"
+      ? `${r.rawRef}<br><span style="color:var(--status-urgent);font-size:11px;">⚠ D365 order / Shopify ref disagree</span>`
       : r.shopifyRef;
     const awbCell = r.consolidatedAwb && r.consolidatedAwb !== r.awb
       ? `${r.awb||"—"}<br><span style="color:var(--fg2);font-size:11px;">D365 AWB: ${r.consolidatedAwb}</span>`
       : (r.awb||"—");
+    const skuCell = isManual
+      ? `<input type="text" data-row-sku="${i}" value="${(r.sku||"").replace(/"/g,'&quot;')}" placeholder="enter SKU" style="width:120px;font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid ${r.sku?'var(--border-strong)':'var(--status-urgent)'};border-radius:6px;background:var(--bg-page);color:var(--fg1);">`
+      : (r.sku||"—");
     return `<tr>
-      <td style="${TABLE_TD}">${refCell}</td><td style="${TABLE_TD_NOWRAP}">${r.salesOrder||"—"}</td><td style="${TABLE_TD_NOWRAP}">${r.sku||"—"}</td>
+      <td style="${TABLE_TD}">${refCell}</td><td style="${TABLE_TD_NOWRAP}">${r.salesOrder||"—"}</td><td style="${TABLE_TD_NOWRAP}">${skuCell}</td>
       <td style="${TABLE_TD_NOWRAP}">${r.shippingDateText||"—"}</td><td style="${TABLE_TD}">${awbCell}</td>
-      ${isSf?`<td style="${TABLE_TD_NOWRAP}">${r.returnWaybill||"—"}</td>`:""}
+      ${isManual?`<td style="${TABLE_TD}"><select data-row-dispatchtype="${i}" style="font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid ${r.needsDispatchType&&!r.dispatchType?'var(--status-urgent)':'var(--border-strong)'};border-radius:6px;background:var(--bg-page);color:var(--fg1);">${DISPATCH_TYPES.map(t=>`<option value="${t}" ${r.dispatchType===t?"selected":""}>${t||"— select —"}</option>`).join("")}</select></td>`:""}
+      ${showReturnWaybill?`<td style="${TABLE_TD_NOWRAP}">${r.returnWaybill||"—"}${r.returnWaybillAmbiguous?`<br><span style="color:var(--status-urgent);font-size:11px;">ambiguous match</span>`:""}</td>`:""}
       <td style="${TABLE_TD_NOWRAP}">${r.serial||"—"}</td>
       <td style="${TABLE_TD}"><input type="text" data-row-batch="${i}" value="${(r.batch||"").replace(/"/g,'&quot;')}" style="width:100px;font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);"></td>
       <td style="${TABLE_TD}">${r.batchSource||"—"}</td>
+      ${isManual?`<td style="${TABLE_TD}">${r.remarks||"—"}</td>`:""}
       <td style="${TABLE_TD}">${ok?`<span style="${pillStyle('ready')}">READY</span>`:`<span style="${pillStyle('hold')}">BLOCKED</span>`}${r.issues.map(iss=>`<span style="${TAG_STYLE}">${iss}</span>`).join("")}${r.matchNote?`<span style="${TAG_STYLE}background:var(--im8-cream);">${r.matchNote}</span>`:""}</td>
     </tr>`;
   }).join("");
@@ -2014,6 +2292,23 @@ function d365fRenderTable(){
       row.batch = input.value.trim();
       row.batchSource = row.batch ? "Manual" : "";
       d365fRecomputeBatchIssue(row);
+      d365fRenderAll();
+    });
+  });
+  document.querySelectorAll("[data-row-sku]").forEach(input=>{
+    input.addEventListener("change", ()=>{
+      const row = D365F.matched[Number(input.dataset.rowSku)];
+      row.sku = input.value.trim();
+      row.skuSource = row.sku ? "Manual entry" : "";
+      d365fRecomputeManualIssues(row);
+      d365fRenderAll();
+    });
+  });
+  document.querySelectorAll("[data-row-dispatchtype]").forEach(sel=>{
+    sel.addEventListener("change", ()=>{
+      const row = D365F.matched[Number(sel.dataset.rowDispatchtype)];
+      row.dispatchType = sel.value;
+      d365fRecomputeManualIssues(row);
       d365fRenderAll();
     });
   });
@@ -2031,6 +2326,7 @@ function d365fRenderExportCard(){
   if(blocked === 0) note.textContent = `All ${D365F.matched.length} kits are ready — nothing is blocked.`;
   else if(!document.getElementById("d365fExportReadyOnly").checked) note.textContent = `${blocked} kit(s) are blocked — export is disabled until they're resolved, or check "export ready kits only" below.`;
   else note.textContent = excludedOrders.length ? `Exporting ${toExport.length} ready kit(s). Excluded order(s) with a blocked kit: ${excludedOrders.join(", ")}.` : `Exporting ${toExport.length} ready kit(s). Nothing excluded.`;
+  if(d365fCfg().locationUnconfirmed) note.textContent += ` ⚠ Warehouse location "${d365fCfg().warehouseLocation}" is UNCONFIRMED in D365 — verify before importing this file.`;
 }
 function d365fRenderHistory(){
   const tbody = document.querySelector("#d365fHistoryTable tbody");
@@ -2067,6 +2363,7 @@ function d365fUpdateSheetsPreview(outputKey){
 }
 function d365fRenderSheetsCard(){
   const card = document.getElementById("d365fSheetsCard");
+  if(D365F.carrier === "manual"){ card.style.display = "none"; return; }
   if(!D365F.matched.length && !(D365F.fedexAwbPairs||[]).length){ card.style.display = "none"; return; }
   card.style.display = "block";
   const outputKeys = d365fSheetsOutputKeysForCarrier();
@@ -2442,10 +2739,11 @@ document.getElementById("btnResetCfg").addEventListener("click", ()=>{
   saveConfig(CONFIG); renderConfig(); toast("Config reset to defaults");
 });
 /* ---- D365 Fulfillment wiring ---- */
-let d365fUploaded = { fedex: null, sfoutbound: null, sfsn: null, joborder: null, onhand: null };
+let d365fUploaded = { fedex: null, sfoutbound: null, sfsn: null, joborder: null, onhand: null, manualupload: null, manualorderlines: null };
 function d365fCheckReady(){
   const btn = document.getElementById("btnD365fProcess");
-  const ok = D365F.carrier === "sf"
+  const ok = D365F.carrier === "manual" ? false
+    : D365F.carrier === "sf"
     ? !!(d365fUploaded.sfoutbound && d365fUploaded.sfsn && d365fUploaded.joborder)
     : !!(d365fUploaded.fedex && d365fUploaded.joborder);
   btn.disabled = !ok; btn.style.opacity = ok ? "1" : "0.4";
@@ -2456,6 +2754,9 @@ function d365fStatusLine(){
     if(d365fUploaded.sfoutbound) lines.push(`SF Outbound report: ${D365F.sfOutboundRows ? D365F.sfOutboundRows.length : 0} line(s) parsed.`);
     if(d365fUploaded.sfsn) lines.push(`SF Outbound SN report: ${D365F.sfSnRows ? D365F.sfSnRows.length : 0} serial(s) parsed.`);
     if(d365fUploaded.sfoutbound && d365fUploaded.sfsn) lines.push(`Joined into ${D365F.kits.length} kit(s).`);
+  } else if(D365F.carrier === "manual"){
+    if(D365F.manualCandidates.length) lines.push(`${D365F.manualCandidates.length} candidate row(s) loaded — select which actually shipped from OPS-WH01 below.`);
+    if(D365F.kits.length) lines.push(`${D365F.kits.length} kit(s) processed from selected rows.`);
   } else {
     if(d365fUploaded.fedex) lines.push(`FedEx report: ${D365F.kits.length} kit row(s) parsed${D365F.parseIssues.length?` — ⚠ ${D365F.parseIssues.join("; ")}`:""}.`);
   }
@@ -2467,26 +2768,35 @@ function d365fSwitchCarrier(carrier){
   D365F.carrier = carrier;
   D365F.kits = []; D365F.parseIssues = []; D365F.matched = [];
   D365F.sfOutboundRows = null; D365F.sfSnRows = null; D365F.fedexAwbPairs = null;
+  D365F.manualCandidates = []; D365F.manualOrderLineIndex = null; D365F.manualOrderLineNeedsMapping = null; D365F.manualSelected = new Set();
   d365fUploaded.fedex = null; d365fUploaded.sfoutbound = null; d365fUploaded.sfsn = null;
+  d365fUploaded.manualupload = null; d365fUploaded.manualorderlines = null;
   document.getElementById("wrap-fxreport").style.display = carrier==="fedex" ? "" : "none";
   document.getElementById("wrap-sfoutbound").style.display = carrier==="sf" ? "" : "none";
   document.getElementById("wrap-sfsn").style.display = carrier==="sf" ? "" : "none";
-  [["dz-fxreport","fname-fxreport","Click or drop file"],["dz-sfoutbound","fname-sfoutbound","Click or drop file"],["dz-sfsn","fname-sfsn","Click or drop file"]].forEach(([zoneId,fnameId,label])=>{
+  document.getElementById("d365fManualCard").style.display = carrier==="manual" ? "" : "none";
+  document.getElementById("wrap-matchbtn").style.display = carrier==="manual" ? "none" : "flex";
+  const sheetsCard = document.getElementById("d365fSheetsCard");
+  if(carrier==="manual"){ sheetsCard.style.display = "none"; }
+  document.getElementById("manualCandidatesWrap").style.display = "none";
+  document.getElementById("manualCandidatesTable").querySelector("tbody").innerHTML = "";
+  [["dz-fxreport","fname-fxreport","Click or drop file"],["dz-sfoutbound","fname-sfoutbound","Click or drop file"],["dz-sfsn","fname-sfsn","Click or drop file"],["dz-manualupload","fname-manualupload",'Click or drop a downloaded copy with the "Outbound Report (FedEx)" tab'],["dz-manualorderlines","fname-manualorderlines","For manual orders missing from the Job Order file — click or drop file"]].forEach(([zoneId,fnameId,label])=>{
     const zone = document.getElementById(zoneId);
     zone.style.borderStyle = "dashed"; zone.style.borderColor = "var(--border-strong)"; zone.style.background = "var(--bg-section)";
     document.getElementById(fnameId).textContent = label;
   });
-  const fedexBtn = document.getElementById("btnCarrierFedex"), sfBtn = document.getElementById("btnCarrierSf");
-  fedexBtn.style.background = carrier==="fedex" ? "var(--im8-red-algae)" : "transparent";
-  fedexBtn.style.color = carrier==="fedex" ? "#fff" : "var(--fg-heading)";
-  fedexBtn.style.border = carrier==="fedex" ? "none" : "1.5px solid var(--im8-burgundy)";
-  sfBtn.style.background = carrier==="sf" ? "var(--im8-red-algae)" : "transparent";
-  sfBtn.style.color = carrier==="sf" ? "#fff" : "var(--fg-heading)";
-  sfBtn.style.border = carrier==="sf" ? "none" : "1.5px solid var(--im8-burgundy)";
+  const fedexBtn = document.getElementById("btnCarrierFedex"), sfBtn = document.getElementById("btnCarrierSf"), manualBtn = document.getElementById("btnCarrierManual");
+  [[fedexBtn,"fedex"],[sfBtn,"sf"],[manualBtn,"manual"]].forEach(([btn,key])=>{
+    const active = carrier===key;
+    btn.style.background = active ? "var(--im8-red-algae)" : "transparent";
+    btn.style.color = active ? "#fff" : "var(--fg-heading)";
+    btn.style.border = active ? "none" : "1.5px solid var(--im8-burgundy)";
+  });
   d365fStatusLine(); d365fCheckReady(); d365fRenderAll();
 }
 document.getElementById("btnCarrierFedex").addEventListener("click", ()=>d365fSwitchCarrier("fedex"));
 document.getElementById("btnCarrierSf").addEventListener("click", ()=>d365fSwitchCarrier("sf"));
+document.getElementById("btnCarrierManual").addEventListener("click", ()=>d365fSwitchCarrier("manual"));
 wireDropzone("dz-fxreport","file-fxreport", files=>{
   const file = files[0];
   const reader = new FileReader();
@@ -2588,13 +2898,155 @@ document.getElementById("btnD365fProcess").addEventListener("click", ()=>{
   d365fRenderAll();
   toast("Orders matched");
 });
+
+/* ---- Manual mode (Own Warehouse OPS-WH01) wiring ---- */
+let d365fManualUploadWorkbook = null;
+function d365fFindSheetByName(workbook, patterns){
+  for(const sn of workbook.SheetNames){
+    const norm = sn.trim().toLowerCase();
+    if(patterns.some(p=>norm.includes(p))) return sn;
+  }
+  return null;
+}
+function d365fSetManualInputMode(mode){
+  const pasteBtn = document.getElementById("btnManualInputPaste"), uploadBtn = document.getElementById("btnManualInputUpload");
+  document.getElementById("manualPastePanel").style.display = mode==="paste" ? "" : "none";
+  document.getElementById("manualUploadPanel").style.display = mode==="upload" ? "" : "none";
+  [[pasteBtn,"paste"],[uploadBtn,"upload"]].forEach(([btn,key])=>{
+    const active = mode===key;
+    btn.style.background = active ? "var(--im8-red-algae)" : "transparent";
+    btn.style.color = active ? "#fff" : "var(--fg-heading)";
+    btn.style.border = active ? "none" : "1.5px solid var(--im8-burgundy)";
+  });
+}
+document.getElementById("btnManualInputPaste").addEventListener("click", ()=>d365fSetManualInputMode("paste"));
+document.getElementById("btnManualInputUpload").addEventListener("click", ()=>d365fSetManualInputMode("upload"));
+function d365fSetManualCandidates(candidates){
+  candidates.forEach(c=>{ c.selected = c.suggested && !c.invoiced; });
+  D365F.manualCandidates = candidates;
+  document.getElementById("manualCandidatesWrap").style.display = candidates.length ? "" : "none";
+  d365fRenderManualCandidates();
+  d365fStatusLine();
+}
+document.getElementById("btnManualLoadPaste").addEventListener("click", ()=>{
+  const outboundText = document.getElementById("manualPasteOutbound").value;
+  if(!outboundText.trim()){ toast("Paste the Outbound Report rows first"); return; }
+  const outboundGrid = d365fParseTsvGrid(outboundText);
+  const candidates = d365fParseManualOutboundGrid(outboundGrid, document.getElementById("manualPasteOutboundHeaders").checked);
+  d365fSetManualCandidates(candidates);
+  toast(`${candidates.length} row(s) loaded from pasted text`);
+});
+wireDropzone("dz-manualupload","file-manualupload", files=>{
+  const file = files[0];
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      d365fManualUploadWorkbook = XLSX.read(e.target.result, {type:"array", cellDates:true});
+      d365fUploaded.manualupload = file;
+      markFilled("dz-manualupload","fname-manualupload",file.name);
+      const hasOutbound = !!d365fFindSheetByName(d365fManualUploadWorkbook, ["outbound report"]);
+      if(!hasOutbound) toast(`Couldn't find an "Outbound Report (FedEx)" tab in ${file.name} — check it's the right spreadsheet`);
+    }catch(err){ toast("Failed to read spreadsheet: "+err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+});
+document.getElementById("btnManualLoadUpload").addEventListener("click", ()=>{
+  if(!d365fManualUploadWorkbook){ toast("Upload the Job Orders spreadsheet copy first"); return; }
+  const outboundSheet = d365fFindSheetByName(d365fManualUploadWorkbook, ["outbound report"]);
+  if(!outboundSheet){ toast('No "Outbound Report (FedEx)" tab found in the uploaded file'); return; }
+  const outboundAoa = XLSX.utils.sheet_to_json(d365fManualUploadWorkbook.Sheets[outboundSheet], {header:1, defval:""});
+  let candidates = d365fParseManualOutboundGrid(outboundAoa, true);
+  const dateFrom = document.getElementById("manualFilterDateFrom").value.trim();
+  const dateTo = document.getElementById("manualFilterDateTo").value.trim();
+  const refFilter = document.getElementById("manualFilterRef").value.trim().toLowerCase();
+  const remarksFilter = document.getElementById("manualFilterRemarks").value.trim().toLowerCase();
+  if(dateFrom) candidates = candidates.filter(c=>c.shippingDate && c.shippingDate >= new Date(dateFrom));
+  if(dateTo) candidates = candidates.filter(c=>c.shippingDate && c.shippingDate <= new Date(dateTo+"T23:59:59"));
+  if(refFilter) candidates = candidates.filter(c=>(c.shopifyRef||"").toLowerCase().includes(refFilter) || (c.manualDirectOrder||"").toLowerCase().includes(refFilter));
+  if(remarksFilter) candidates = candidates.filter(c=>(c.remarks||"").toLowerCase().includes(remarksFilter));
+  d365fSetManualCandidates(candidates);
+  toast(`${candidates.length} row(s) loaded after filters`);
+});
+wireDropzone("dz-manualorderlines","file-manualorderlines", files=>{
+  const file = files[0];
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const wb = XLSX.read(e.target.result, {type:"array"});
+      const { index, needsMapping } = d365fParseManualOrderLines(wb);
+      D365F.manualOrderLineIndex = index; D365F.manualOrderLineNeedsMapping = needsMapping;
+      d365fUploaded.manualorderlines = file;
+      markFilled("dz-manualorderlines","fname-manualorderlines",file.name);
+      if(needsMapping) toast(`Couldn't find "Sales order" / "Item number" columns in ${file.name} — this file won't be used for SKU lookup`);
+      else if(D365F.matched.length){ d365fMatchAndAssign(); d365fRenderAll(); }
+    }catch(err){ toast("Failed to parse D365 sales-order-line export: "+err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+});
+function d365fRenderManualCandidates(){
+  const caption = document.getElementById("manualCandidatesCaption");
+  const candidates = D365F.manualCandidates;
+  const selectedCount = candidates.filter(c=>c.selected).length;
+  caption.textContent = `${candidates.length} row(s) loaded, ${selectedCount} selected. Suggested matches are pre-ticked from remarks (AU-OPS01 / NZ-OPS01 / "for <name> (HK)") — review before processing.`;
+  const thead = document.querySelector("#manualCandidatesTable thead"), tbody = document.querySelector("#manualCandidatesTable tbody");
+  thead.innerHTML = `<tr><th style="${TABLE_TH}"></th><th style="${TABLE_TH}">Date</th><th style="${TABLE_TH}">Shopify ref</th><th style="${TABLE_TH}">D365 order</th><th style="${TABLE_TH}">Product</th><th style="${TABLE_TH}">AWB</th><th style="${TABLE_TH}">Serial</th><th style="${TABLE_TH}">Remarks</th><th style="${TABLE_TH}">Flags</th></tr>`;
+  tbody.innerHTML = candidates.map((c,i)=>{
+    const flags = [];
+    if(c.suggested) flags.push(`<span style="${TAG_STYLE}background:var(--status-ready-bg);color:var(--status-ready);">suggested</span>`);
+    if(c.invoiced) flags.push(`<span style="${TAG_STYLE}background:var(--status-urgent-bg);color:var(--status-urgent);">already invoiced</span>`);
+    if(c.issues && c.issues.length) flags.push(...c.issues.map(iss=>`<span style="${TAG_STYLE}background:var(--status-urgent-bg);color:var(--status-urgent);">${iss}</span>`));
+    return `<tr>
+      <td style="${TABLE_TD}"><input type="checkbox" data-manual-cand="${i}" ${c.selected?"checked":""}></td>
+      <td style="${TABLE_TD_NOWRAP}">${c.shippingDateText||"—"}</td>
+      <td style="${TABLE_TD_NOWRAP}">${c.shopifyRef||"—"}</td>
+      <td style="${TABLE_TD_NOWRAP}">${c.manualDirectOrder||"—"}</td>
+      <td style="${TABLE_TD}">${c.productDescription||"—"}</td>
+      <td style="${TABLE_TD}">${c.awb||"—"}</td>
+      <td style="${TABLE_TD}">${c.serial||"—"}</td>
+      <td style="${TABLE_TD}">${c.remarks||"—"}</td>
+      <td style="${TABLE_TD}">${flags.join("")}</td>
+    </tr>`;
+  }).join("");
+  tbody.querySelectorAll("[data-manual-cand]").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      D365F.manualCandidates[Number(cb.dataset.manualCand)].selected = cb.checked;
+      d365fRenderManualCandidates();
+    });
+  });
+}
+document.getElementById("btnManualSelectSuggested").addEventListener("click", ()=>{
+  D365F.manualCandidates.forEach(c=>{ c.selected = c.suggested && !c.invoiced; });
+  d365fRenderManualCandidates();
+});
+document.getElementById("btnManualSelectAll").addEventListener("click", ()=>{
+  D365F.manualCandidates.forEach(c=>{ c.selected = true; });
+  d365fRenderManualCandidates();
+});
+document.getElementById("btnManualSelectNone").addEventListener("click", ()=>{
+  D365F.manualCandidates.forEach(c=>{ c.selected = false; });
+  d365fRenderManualCandidates();
+});
+document.getElementById("btnManualProcessSelected").addEventListener("click", ()=>{
+  const selected = D365F.manualCandidates.filter(c=>c.selected);
+  if(!selected.length){ toast("Select at least one row to process"); return; }
+  D365F.kits = selected.map(c=>({
+    shopifyRef: c.shopifyRef, manualDirectOrder: c.manualDirectOrder, awb: c.awb, serial: c.serial,
+    productDescription: c.productDescription, shippingDate: c.shippingDate, shippingDateText: c.shippingDateText,
+    manualSku: "", dispatchType: "", remarks: c.remarks, invoiced: c.invoiced,
+    sourceRow: c.sourceRow, issues: [...(c.issues||[])]
+  }));
+  d365fMatchAndAssign();
+  d365fRenderAll();
+  d365fStatusLine();
+  toast(`${D365F.kits.length} kit(s) processed — review SKU, batch and dispatch type below before exporting`);
+});
 document.getElementById("d365fExportReadyOnly").addEventListener("change", d365fRenderExportCard);
 document.getElementById("btnD365fDownload").addEventListener("click", ()=>{
   const { toExport } = d365fComputeExportSet();
   if(!toExport.length) return;
   const stamp = new Date().toISOString().slice(0,10);
   const cfg = d365fCfg();
-  const carrierTag = D365F.carrier==="sf" ? "SF" : "FedEx";
+  const carrierTag = D365F.carrier==="sf" ? "SF" : D365F.carrier==="manual" ? "Manual" : "FedEx";
   const filename = `D365_Fulfillment_${carrierTag}_${cfg.legalEntity}_${cfg.warehouse}_${stamp}_run${D365F.history.length+1}.xlsx`;
   const blob = d365fBuildWorkbook(toExport);
   download(filename, blob);
