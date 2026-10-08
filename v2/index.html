@@ -263,12 +263,12 @@
           <div style="margin-bottom:10px;">
             <label style="display:block;font-size:12.5px;font-weight:600;color:var(--fg-heading);margin-bottom:4px;">Paste "Outbound Report (FedEx)" rows (columns A:I)</label>
             <textarea id="manualPasteOutbound" rows="5" placeholder="Paste tab-separated rows here, e.g. copied straight from the Google Sheet" style="width:100%;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;resize:vertical;"></textarea>
-            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteOutboundHeaders" checked> First pasted row is the header row</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteOutboundHeaders"> First pasted row is the header row</label>
           </div>
           <div style="margin-bottom:10px;">
             <label style="display:block;font-size:12.5px;font-weight:600;color:var(--fg-heading);margin-bottom:4px;">Paste "Fedex AWB number" rows (columns A:D, optional — used only to look up return waybills)</label>
             <textarea id="manualPasteAwb" rows="3" placeholder="Optional — paste matching rows to auto-fill return waybills" style="width:100%;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;resize:vertical;"></textarea>
-            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteAwbHeaders" checked> First pasted row is the header row</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteAwbHeaders"> First pasted row is the header row</label>
           </div>
           <div style="display:flex;justify-content:flex-end;">
             <button id="btnManualLoadPaste" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Load pasted rows</button>
@@ -439,6 +439,18 @@ const DEFAULT_CONFIG = {
     "PRE-FG-000021": "Circle Exome Premium",
     "PRE-FG-000107": "Circle Exome Vital (V2)",
     "PRE-FG-000018": "Circle Premium BDM full kit"
+  },
+  // Manual (Own Warehouse) mode's own-warehouse Outbound Report free-text
+  // "Product" column, matched exactly — a separate table from
+  // skuToShipmentReference (which drives FedEx's own column text) because
+  // this one needs several description variants per SKU, confirmed by the
+  // user rather than guessed (e.g. the Employee variant has its own SKU,
+  // never assumed to share the standard Premium SKU).
+  productDescriptionToSku: {
+    "Circle Exome Premium": "PRE-FG-000021",
+    "Circle Exome Premium(JP)": "PRE-FG-000021",
+    "Circle Premium BDM full kit": "PRE-FG-000018",
+    "Circle Exome Premium (Employee)": "PRE-FG-000085"
   },
   // SKUs FedEx/SF don't hold inventory for. These orders keep their normal
   // country-based route (for classification/what-format-to-use) but never
@@ -1957,9 +1969,12 @@ function d365fMatchAndAssign(){
         issues.push("Row has neither a D365 order number nor a Shopify reference");
       }
       // SKU resolution priority: Job Order data, then the optional D365
-      // sales-order-line export, then explicit manual entry — NEVER by
-      // inferring from product description (e.g. an "(Employee)" variant
-      // must not silently inherit the standard Premium SKU).
+      // sales-order-line export, then an exact match against the confirmed
+      // productDescriptionToSku table, then explicit manual entry. The
+      // productDescriptionToSku lookup is an exact-string config table the
+      // user has explicitly confirmed (including a distinct SKU for the
+      // "(Employee)" variant) — not a similarity guess, so it's safe to use
+      // here unlike inferring from product description would be.
       if(salesOrder){
         if(D365F.jobOrderIndex){
           const joEntries = [...D365F.jobOrderIndex.values()].flat().filter(c=>c.salesOrder===salesOrder);
@@ -1973,6 +1988,7 @@ function d365fMatchAndAssign(){
           if(distinctSkus.length === 1){ sku = distinctSkus[0]; skuSource = "D365 order-line export (unverified format)"; }
           else if(distinctSkus.length > 1) issues.push(`Order "${salesOrder}" has ${distinctSkus.length} different SKUs on the uploaded order-line export (${distinctSkus.join(", ")}) — enter the correct one manually`);
         }
+        if(!sku && CONFIG.productDescriptionToSku[kit.productDescription]){ sku = CONFIG.productDescriptionToSku[kit.productDescription]; skuSource = "Product description mapping"; }
         if(!sku && kit.manualSku){ sku = kit.manualSku; skuSource = "Manual entry"; }
         if(!sku) issues.push(`Could not resolve a SKU for order "${salesOrder}" from the product description "${kit.productDescription}" — enter the correct SKU manually`);
       }
