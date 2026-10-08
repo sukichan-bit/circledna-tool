@@ -252,7 +252,7 @@
       <div id="d365fManualCard" style="display:none;background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);">
         <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Manual shipments — Own Warehouse (OPS-WH01)</h2>
         <div style="color:var(--status-urgent);font-size:12.5px;margin-bottom:4px;font-weight:600;">⚠ Warehouse location "Prenetics~OPS-WH01~Primary" has NOT been confirmed in D365 — verify before relying on generated files.</div>
-        <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">These rows don't come from a warehouse report — they're manual shipments identified by remarks like "AU-OPS01", "NZ-OPS01", or "for &lt;name&gt; (HK)" in your own Outbound Report (FedEx) tab. Paste or upload the source rows, then explicitly pick which ones actually shipped from your own warehouse. No batch default exists for this mode — every selected kit needs its own batch entered before export.</div>
+        <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">These rows don't come from a warehouse report — they're manual shipments identified by remarks like "AU-OPS01", "NZ-OPS01", or "for &lt;name&gt; (HK)" in your own Outbound Report (FedEx) tab. Paste or upload the source rows, then explicitly pick which ones actually shipped from your own warehouse. Set a default batch per SKU below (like FedEx/SF) and edit individual rows in Review if one batch isn't available for all of them.</div>
 
         <div style="display:flex;gap:8px;margin-bottom:14px;">
           <button id="btnManualInputPaste" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:7px 16px;font-size:12px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Paste rows</button>
@@ -263,12 +263,7 @@
           <div style="margin-bottom:10px;">
             <label style="display:block;font-size:12.5px;font-weight:600;color:var(--fg-heading);margin-bottom:4px;">Paste "Outbound Report (FedEx)" rows (columns A:I)</label>
             <textarea id="manualPasteOutbound" rows="5" placeholder="Paste tab-separated rows here, e.g. copied straight from the Google Sheet" style="width:100%;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;resize:vertical;"></textarea>
-            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteOutboundHeaders" checked> First pasted row is the header row</label>
-          </div>
-          <div style="margin-bottom:10px;">
-            <label style="display:block;font-size:12.5px;font-weight:600;color:var(--fg-heading);margin-bottom:4px;">Paste "Fedex AWB number" rows (columns A:D, optional — used only to look up return waybills)</label>
-            <textarea id="manualPasteAwb" rows="3" placeholder="Optional — paste matching rows to auto-fill return waybills" style="width:100%;font-family:monospace;font-size:11px;padding:8px;border:1px solid var(--border-strong);border-radius:6px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;resize:vertical;"></textarea>
-            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteAwbHeaders" checked> First pasted row is the header row</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--fg2);margin-top:4px;"><input type="checkbox" id="manualPasteOutboundHeaders"> First pasted row is the header row</label>
           </div>
           <div style="display:flex;justify-content:flex-end;">
             <button id="btnManualLoadPaste" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Load pasted rows</button>
@@ -279,7 +274,7 @@
           <div id="dz-manualupload" style="border:2px dashed var(--border-strong);border-radius:12px;padding:22px;text-align:center;cursor:pointer;background:var(--bg-section);margin-bottom:12px;">
             <input type="file" id="file-manualupload" accept=".xlsx,.xls" style="display:none;">
             <div style="font-family:var(--font-sans);font-size:13.5px;font-weight:600;color:var(--fg-heading);">Job Orders spreadsheet copy (.xlsx)</div>
-            <div id="fname-manualupload" style="margin-top:6px;font-size:12.5px;color:var(--fg2);">Click or drop a downloaded copy with the "Outbound Report (FedEx)" and "Fedex AWB number" tabs</div>
+            <div id="fname-manualupload" style="margin-top:6px;font-size:12.5px;color:var(--fg2);">Click or drop a downloaded copy with the "Outbound Report (FedEx)" tab</div>
           </div>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px;">
             <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Date from</label><input type="text" id="manualFilterDateFrom" placeholder="YYYY-MM-DD" style="width:100%;font-family:var(--font-sans);font-size:12px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
@@ -439,6 +434,18 @@ const DEFAULT_CONFIG = {
     "PRE-FG-000021": "Circle Exome Premium",
     "PRE-FG-000107": "Circle Exome Vital (V2)",
     "PRE-FG-000018": "Circle Premium BDM full kit"
+  },
+  // Manual (Own Warehouse) mode's own-warehouse Outbound Report free-text
+  // "Product" column, matched exactly — a separate table from
+  // skuToShipmentReference (which drives FedEx's own column text) because
+  // this one needs several description variants per SKU, confirmed by the
+  // user rather than guessed (e.g. the Employee variant has its own SKU,
+  // never assumed to share the standard Premium SKU).
+  productDescriptionToSku: {
+    "Circle Exome Premium": "PRE-FG-000021",
+    "Circle Exome Premium(JP)": "PRE-FG-000021",
+    "Circle Premium BDM full kit": "PRE-FG-000018",
+    "Circle Exome Premium (Employee)": "PRE-FG-000085"
   },
   // SKUs FedEx/SF don't hold inventory for. These orders keep their normal
   // country-based route (for classification/what-format-to-use) but never
@@ -1267,7 +1274,7 @@ function d365fCfg(){ return D365F_CARRIER_CONFIG[D365F.carrier]; }
 function d365fLoadDefaultBatches(){
   try{
     const raw = JSON.parse(localStorage.getItem("circledna_d365f_default_batches")||"{}");
-    return { fedex: raw.fedex||{}, sf: raw.sf||{}, manual:{} };
+    return { fedex: raw.fedex||{}, sf: raw.sf||{}, manual: raw.manual||{} };
   }catch(e){ return { fedex:{}, sf:{}, manual:{} }; }
 }
 function d365fSaveDefaultBatches(m){ localStorage.setItem("circledna_d365f_default_batches", JSON.stringify(m)); }
@@ -1283,7 +1290,7 @@ let D365F = {
   sfOutboundRows: null, sfSnRows: null, fedexAwbPairs: null,
   jobOrderIndex: null, jobOrderNeedsMapping: null,
   onHand: null,
-  manualCandidates: [], manualAwbPairs: null, manualOrderLineIndex: null, manualOrderLineNeedsMapping: null, manualSelected: new Set(),
+  manualCandidates: [], manualOrderLineIndex: null, manualOrderLineNeedsMapping: null, manualSelected: new Set(),
   matched: [],
   defaultBatches: d365fLoadDefaultBatches(),
   history: [],
@@ -1729,12 +1736,11 @@ function d365fJoinSfReports(outboundRows, snRows){
 
 /* ---- Manual mode (Own Warehouse, OPS-WH01): the source isn't a warehouse
    report at all — it's the operator's own paste/upload of rows from this
-   tool's own "Outbound Report (FedEx)" / "Fedex AWB number" Google Sheets
-   tabs, re-used here as INPUT. Never assume a row belongs to OPS-WH01 just
-   because it's being reviewed here — the operator explicitly selects which
-   rows actually shipped from the own warehouse (see manual candidates UI). ---- */
+   tool's own "Outbound Report (FedEx)" Google Sheets tab, re-used here as
+   INPUT. Never assume a row belongs to OPS-WH01 just because it's being
+   reviewed here — the operator explicitly selects which rows actually
+   shipped from the own warehouse (see manual candidates UI). ---- */
 const D365F_MANUAL_OUTBOUND_HEADERS = ["date","ep order id / shopify reference","d365 so number","awb","product","barcode","shopify fulfilment","invoiced in d365?","special remarks"];
-const D365F_MANUAL_AWB_HEADERS = ["date","transaction id","outbound shipment number","return shipment number"];
 // Remarks that SUGGEST (never conclusively prove) a row shipped from our
 // own warehouse — operator still has to tick the row explicitly.
 function d365fManualSuggested(remarks){
@@ -1757,7 +1763,7 @@ function d365fMapManualOutboundRow(row, sourceRow){
     shopifyFulfilment, invoicedInD365, remarks,
     suggested: d365fManualSuggested(remarks),
     invoiced: /^(y|yes|done|true|1)$/i.test(invoicedInD365.trim()),
-    manualSku: "", dispatchType: "", returnWaybill: null,
+    manualSku: "", dispatchType: "",
     issues
   };
 }
@@ -1770,29 +1776,6 @@ function d365fParseManualOutboundGrid(aoa, hasHeaders){
     rows.push(d365fMapManualOutboundRow(row, r+1));
   }
   return rows;
-}
-function d365fParseManualAwbGrid(aoa, hasHeaders){
-  const startRow = hasHeaders ? 1 : 0;
-  const pairs = [];
-  for(let r=startRow; r<aoa.length; r++){
-    const row = aoa[r]||[];
-    if(row.every(c=>String(c||"").trim()==="")) continue;
-    const date = d365fParseFlexibleDate(row[0]);
-    pairs.push({ shippingDateText: date ? d365fFormatDateForD365(date) : null, shopifyRef: String(row[1]||"").trim(), outboundAwb: String(row[2]||"").trim(), returnAwb: String(row[3]||"").trim() });
-  }
-  return pairs;
-}
-// Return waybill lookup: Shopify reference + outbound AWB + date, never row
-// position. Ambiguous (>1 match) is surfaced, not guessed.
-function d365fLookupManualReturnWaybill(candidate, awbPairs){
-  if(!awbPairs || !awbPairs.length) return { returnWaybill: null, ambiguous: false };
-  const key = r => `${r.shopifyRef||candidate.manualDirectOrder||""}|${r.outboundAwb}|${r.shippingDateText||""}`;
-  const target = `${candidate.shopifyRef||candidate.manualDirectOrder||""}|${candidate.awb}|${candidate.shippingDateText||""}`;
-  const matches = awbPairs.filter(r=>key(r)===target && r.returnAwb);
-  if(!matches.length) return { returnWaybill: null, ambiguous: false };
-  const distinct = [...new Set(matches.map(m=>m.returnAwb))];
-  if(distinct.length>1) return { returnWaybill: null, ambiguous: true };
-  return { returnWaybill: distinct[0], ambiguous: false };
 }
 // Optional D365 sales-order-line export, for SKUs on manual orders that
 // aren't in the morning Job Order file. No real sample has been seen, so
@@ -1919,7 +1902,7 @@ function d365fMatchAndAssign(){
     const directD365Match = rawRef.match(/^([A-Za-z]\d{3}-SO-\d+)(?:_\d+)?$/);
     const isDirectD365Order = !!directD365Match && carrier !== "manual";
     let resolvedRef, matchMethod;
-    let skuSource = "", dispatchType = kit.dispatchType || "", needsDispatchType = false, returnWaybillAmbiguous = !!kit.returnWaybillAmbiguous;
+    let skuSource = "", dispatchType = kit.dispatchType || "", needsDispatchType = false;
     if(carrier === "manual"){
       // D365 order number (column C) is authoritative when present; Shopify
       // reference (column B) is only used to RESOLVE an order when column C
@@ -1956,9 +1939,12 @@ function d365fMatchAndAssign(){
         issues.push("Row has neither a D365 order number nor a Shopify reference");
       }
       // SKU resolution priority: Job Order data, then the optional D365
-      // sales-order-line export, then explicit manual entry — NEVER by
-      // inferring from product description (e.g. an "(Employee)" variant
-      // must not silently inherit the standard Premium SKU).
+      // sales-order-line export, then an exact match against the confirmed
+      // productDescriptionToSku table, then explicit manual entry. The
+      // productDescriptionToSku lookup is an exact-string config table the
+      // user has explicitly confirmed (including a distinct SKU for the
+      // "(Employee)" variant) — not a similarity guess, so it's safe to use
+      // here unlike inferring from product description would be.
       if(salesOrder){
         if(D365F.jobOrderIndex){
           const joEntries = [...D365F.jobOrderIndex.values()].flat().filter(c=>c.salesOrder===salesOrder);
@@ -1972,6 +1958,7 @@ function d365fMatchAndAssign(){
           if(distinctSkus.length === 1){ sku = distinctSkus[0]; skuSource = "D365 order-line export (unverified format)"; }
           else if(distinctSkus.length > 1) issues.push(`Order "${salesOrder}" has ${distinctSkus.length} different SKUs on the uploaded order-line export (${distinctSkus.join(", ")}) — enter the correct one manually`);
         }
+        if(!sku && CONFIG.productDescriptionToSku[kit.productDescription]){ sku = CONFIG.productDescriptionToSku[kit.productDescription]; skuSource = "Product description mapping"; }
         if(!sku && kit.manualSku){ sku = kit.manualSku; skuSource = "Manual entry"; }
         if(!sku) issues.push(`Could not resolve a SKU for order "${salesOrder}" from the product description "${kit.productDescription}" — enter the correct SKU manually`);
       }
@@ -2043,7 +2030,7 @@ function d365fMatchAndAssign(){
     const row = {
       carrier, rawRef, shopifyRef: resolvedRef || rawRef, isDirectD365Order, matchMethod, salesOrder, sku, skuSource, matchNote,
       shippingDate: kit.shippingDate, shippingDateText: kit.shippingDateText, awb: kit.awb, serial: kit.serial,
-      returnWaybill: kit.returnWaybill || null, returnWaybillAmbiguous, productDescription: kit.productDescription, sfProductLabel: kit.sfProductLabel || null,
+      returnWaybill: kit.returnWaybill || null, productDescription: kit.productDescription, sfProductLabel: kit.sfProductLabel || null,
       warehouseLocation: cfg.warehouseLocation, warehouseLocationUnconfirmed: !!cfg.locationUnconfirmed, batch, batchSource,
       dispatchType, needsDispatchType, remarks: kit.remarks || null, invoiced: !!kit.invoiced,
       fingerprint, serialFingerprint, sourceSheet: kit.sourceSheet, sourceRow: kit.sourceRow, issues, batchIssues
@@ -2230,7 +2217,6 @@ function d365fRenderOnhandMapCard(){
 }
 function d365fRenderBatchDefaults(){
   const card = document.getElementById("d365fBatchCard");
-  if(D365F.carrier === "manual"){ card.style.display = "none"; return; }
   const skus = [...new Set(D365F.matched.map(r=>r.sku).filter(Boolean))];
   if(!skus.length){ card.style.display = "none"; return; }
   card.style.display = "block";
@@ -2269,7 +2255,7 @@ function d365fRenderTable(){
   card.style.display = "block";
   const isSf = D365F.carrier === "sf";
   const isManual = D365F.carrier === "manual";
-  const showReturnWaybill = isSf || isManual;
+  const showReturnWaybill = isSf;
   const DISPATCH_TYPES = ["", "Courier tracking", "Local delivery", "Collection", "Other dispatch reference"];
   const thead = document.querySelector("#d365fTable thead"), tbody = document.querySelector("#d365fTable tbody");
   thead.innerHTML = `<tr><th style="${TABLE_TH}">Raw ref</th><th style="${TABLE_TH}">D365 order</th><th style="${TABLE_TH}">SKU</th><th style="${TABLE_TH}">Ship date</th><th style="${TABLE_TH}">AWB</th>${isManual?`<th style="${TABLE_TH}">Dispatch type</th>`:""}${showReturnWaybill?`<th style="${TABLE_TH}">Return waybill</th>`:""}<th style="${TABLE_TH}">Serial</th><th style="${TABLE_TH}">Batch</th><th style="${TABLE_TH}">Source</th>${isManual?`<th style="${TABLE_TH}">Remarks</th>`:""}<th style="${TABLE_TH}">Status</th></tr>`;
@@ -2782,7 +2768,7 @@ function d365fSwitchCarrier(carrier){
   D365F.carrier = carrier;
   D365F.kits = []; D365F.parseIssues = []; D365F.matched = [];
   D365F.sfOutboundRows = null; D365F.sfSnRows = null; D365F.fedexAwbPairs = null;
-  D365F.manualCandidates = []; D365F.manualAwbPairs = null; D365F.manualOrderLineIndex = null; D365F.manualOrderLineNeedsMapping = null; D365F.manualSelected = new Set();
+  D365F.manualCandidates = []; D365F.manualOrderLineIndex = null; D365F.manualOrderLineNeedsMapping = null; D365F.manualSelected = new Set();
   d365fUploaded.fedex = null; d365fUploaded.sfoutbound = null; d365fUploaded.sfsn = null;
   d365fUploaded.manualupload = null; d365fUploaded.manualorderlines = null;
   document.getElementById("wrap-fxreport").style.display = carrier==="fedex" ? "" : "none";
@@ -2790,11 +2776,11 @@ function d365fSwitchCarrier(carrier){
   document.getElementById("wrap-sfsn").style.display = carrier==="sf" ? "" : "none";
   document.getElementById("d365fManualCard").style.display = carrier==="manual" ? "" : "none";
   document.getElementById("wrap-matchbtn").style.display = carrier==="manual" ? "none" : "flex";
-  const batchCard = document.getElementById("d365fBatchCard"), sheetsCard = document.getElementById("d365fSheetsCard");
-  if(carrier==="manual"){ batchCard.style.display = "none"; sheetsCard.style.display = "none"; }
+  const sheetsCard = document.getElementById("d365fSheetsCard");
+  if(carrier==="manual"){ sheetsCard.style.display = "none"; }
   document.getElementById("manualCandidatesWrap").style.display = "none";
   document.getElementById("manualCandidatesTable").querySelector("tbody").innerHTML = "";
-  [["dz-fxreport","fname-fxreport","Click or drop file"],["dz-sfoutbound","fname-sfoutbound","Click or drop file"],["dz-sfsn","fname-sfsn","Click or drop file"],["dz-manualupload","fname-manualupload",'Click or drop a downloaded copy with the "Outbound Report (FedEx)" and "Fedex AWB number" tabs'],["dz-manualorderlines","fname-manualorderlines","For manual orders missing from the Job Order file — click or drop file"]].forEach(([zoneId,fnameId,label])=>{
+  [["dz-fxreport","fname-fxreport","Click or drop file"],["dz-sfoutbound","fname-sfoutbound","Click or drop file"],["dz-sfsn","fname-sfsn","Click or drop file"],["dz-manualupload","fname-manualupload",'Click or drop a downloaded copy with the "Outbound Report (FedEx)" tab'],["dz-manualorderlines","fname-manualorderlines","For manual orders missing from the Job Order file — click or drop file"]].forEach(([zoneId,fnameId,label])=>{
     const zone = document.getElementById(zoneId);
     zone.style.borderStyle = "dashed"; zone.style.borderColor = "var(--border-strong)"; zone.style.background = "var(--bg-section)";
     document.getElementById(fnameId).textContent = label;
@@ -2935,14 +2921,6 @@ function d365fSetManualInputMode(mode){
 }
 document.getElementById("btnManualInputPaste").addEventListener("click", ()=>d365fSetManualInputMode("paste"));
 document.getElementById("btnManualInputUpload").addEventListener("click", ()=>d365fSetManualInputMode("upload"));
-function d365fApplyManualReturnWaybills(candidates){
-  if(!D365F.manualAwbPairs) return;
-  for(const c of candidates){
-    const { returnWaybill, ambiguous } = d365fLookupManualReturnWaybill(c, D365F.manualAwbPairs);
-    if(returnWaybill) c.returnWaybill = returnWaybill;
-    c.returnWaybillAmbiguous = ambiguous;
-  }
-}
 function d365fSetManualCandidates(candidates){
   candidates.forEach(c=>{ c.selected = c.suggested && !c.invoiced; });
   D365F.manualCandidates = candidates;
@@ -2955,9 +2933,6 @@ document.getElementById("btnManualLoadPaste").addEventListener("click", ()=>{
   if(!outboundText.trim()){ toast("Paste the Outbound Report rows first"); return; }
   const outboundGrid = d365fParseTsvGrid(outboundText);
   const candidates = d365fParseManualOutboundGrid(outboundGrid, document.getElementById("manualPasteOutboundHeaders").checked);
-  const awbText = document.getElementById("manualPasteAwb").value;
-  D365F.manualAwbPairs = awbText.trim() ? d365fParseManualAwbGrid(d365fParseTsvGrid(awbText), document.getElementById("manualPasteAwbHeaders").checked) : null;
-  d365fApplyManualReturnWaybills(candidates);
   d365fSetManualCandidates(candidates);
   toast(`${candidates.length} row(s) loaded from pasted text`);
 });
@@ -2981,8 +2956,6 @@ document.getElementById("btnManualLoadUpload").addEventListener("click", ()=>{
   if(!outboundSheet){ toast('No "Outbound Report (FedEx)" tab found in the uploaded file'); return; }
   const outboundAoa = XLSX.utils.sheet_to_json(d365fManualUploadWorkbook.Sheets[outboundSheet], {header:1, defval:""});
   let candidates = d365fParseManualOutboundGrid(outboundAoa, true);
-  const awbSheet = d365fFindSheetByName(d365fManualUploadWorkbook, ["awb number"]);
-  D365F.manualAwbPairs = awbSheet ? d365fParseManualAwbGrid(XLSX.utils.sheet_to_json(d365fManualUploadWorkbook.Sheets[awbSheet], {header:1, defval:""}), true) : null;
   const dateFrom = document.getElementById("manualFilterDateFrom").value.trim();
   const dateTo = document.getElementById("manualFilterDateTo").value.trim();
   const refFilter = document.getElementById("manualFilterRef").value.trim().toLowerCase();
@@ -2991,9 +2964,8 @@ document.getElementById("btnManualLoadUpload").addEventListener("click", ()=>{
   if(dateTo) candidates = candidates.filter(c=>c.shippingDate && c.shippingDate <= new Date(dateTo+"T23:59:59"));
   if(refFilter) candidates = candidates.filter(c=>(c.shopifyRef||"").toLowerCase().includes(refFilter) || (c.manualDirectOrder||"").toLowerCase().includes(refFilter));
   if(remarksFilter) candidates = candidates.filter(c=>(c.remarks||"").toLowerCase().includes(remarksFilter));
-  d365fApplyManualReturnWaybills(candidates);
   d365fSetManualCandidates(candidates);
-  toast(`${candidates.length} row(s) loaded after filters${awbSheet?"":" (no AWB-pairs tab found — return waybills won't auto-fill)"}`);
+  toast(`${candidates.length} row(s) loaded after filters`);
 });
 wireDropzone("dz-manualorderlines","file-manualorderlines", files=>{
   const file = files[0];
@@ -3060,7 +3032,6 @@ document.getElementById("btnManualProcessSelected").addEventListener("click", ()
   D365F.kits = selected.map(c=>({
     shopifyRef: c.shopifyRef, manualDirectOrder: c.manualDirectOrder, awb: c.awb, serial: c.serial,
     productDescription: c.productDescription, shippingDate: c.shippingDate, shippingDateText: c.shippingDateText,
-    returnWaybill: c.returnWaybill, returnWaybillAmbiguous: c.returnWaybillAmbiguous,
     manualSku: "", dispatchType: "", remarks: c.remarks, invoiced: c.invoiced,
     sourceRow: c.sourceRow, issues: [...(c.issues||[])]
   }));
