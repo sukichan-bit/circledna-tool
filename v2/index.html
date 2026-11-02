@@ -593,6 +593,20 @@ function shopifyCsvToOrders(text){
 /* ======================================================================
    D365 WORKBOOK PARSER
    ====================================================================== */
+// The D365 export's own created-date column name hasn't been pinned down
+// against a real sample, so several likely variants are tried in order —
+// first match wins. If the real export uses a different header, add it
+// here (column H will just stay blank until then, same as before this fix).
+const D365_CREATED_DATE_HEADER_CANDIDATES = [
+  "Created date and time","Created Date and Time","Created date","Created Date",
+  "Order created date","Date created","Creation date","Created"
+];
+function d365RawCreatedDate(r){
+  for(const key of D365_CREATED_DATE_HEADER_CANDIDATES){
+    if(r[key] !== undefined && String(r[key]).trim() !== "") return r[key];
+  }
+  return "";
+}
 function d365WorkbookToRows(workbook){
   const wantCols = ["Shopify reference","Sales order","Item number","Quantity","Country/region","Status"];
   let sheetName = workbook.SheetNames.find(n => n.toLowerCase() === "d365") || workbook.SheetNames[0];
@@ -609,6 +623,7 @@ function d365WorkbookToRows(workbook){
     quantity: Number(r["Quantity"]||0),
     country: String(r["Country/region"]||"").trim().toUpperCase(),
     status: String(r["Status"]||"").trim(),
+    createdAt: d365RawCreatedDate(r),
     exported: Number(r["Exported"] ?? r["CW deliver remainder"] ?? 0),
     deliverRemainder: r["Deliver remainder"] !== undefined ? Number(r["Deliver remainder"]) :
                        (r["CW deliver remainder"] !== undefined ? Number(r["CW deliver remainder"]) : Number(r["Quantity"]||0)),
@@ -904,6 +919,19 @@ function buildSfExport(records, cfg, wantNoInventory){
   return rows;
 }
 function buildSfNoInventoryExport(records, cfg){ return buildSfExport(records, cfg, true); }
+const FULL_MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+// Job Order export's "Created date and time" column wants "18 September
+// 2026" text, not whatever raw format the D365 export happens to use —
+// reuses the D365 Fulfillment feature's own flexible date parser (handles
+// Excel date cells, M/D/YYYY, ISO, and "D Mon YYYY" text) since it's
+// exactly the same problem. Falls back to the raw value as-is if it can't
+// be parsed, rather than silently dropping it.
+function formatCreatedDateForJobOrder(raw){
+  if(!raw) return "";
+  const date = d365fParseFlexibleDate(raw);
+  if(!date) return String(raw);
+  return `${date.getDate()} ${FULL_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
+}
 const JOB_ORDER_HEADER =["Shopify reference","Sales order","Item number","Product name","Quantity","Country/region",
   "Status","Created date and time","Shipping Method","Recipient Contact Name","Recipient Address Line 1",
   "Recipient Address Line 2","Recipient City","Recipient Country Code","Recipient Zip Code","Recipient Tel No.",
@@ -913,7 +941,7 @@ function buildJobOrderExport(records){
   for(const rec of records.filter(r=>effStatus(r)==="READY")){
     const so = rec.shopify, d = rec.d365;
     rows.push([
-      d.shopifyRef, d.salesOrder, d.itemNumber, d.productName, rec.kitQty, d.country, d.status, d.createdAt||"",
+      d.shopifyRef, d.salesOrder, d.itemNumber, d.productName, rec.kitQty, d.country, d.status, formatCreatedDateForJobOrder(d.createdAt),
       "Free Shipping", so ? so.shipName : "", so ? so.shipAddr1 : "", so ? so.shipAddr2 : "", so ? so.shipCity : "",
       rec.country||"", so ? textSafe(so.shipZip) : "", textSafe(rec.phone), so ? so.email : "", "",
       so ? extractTaxId(so) : ""
