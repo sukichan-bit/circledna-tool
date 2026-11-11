@@ -1677,7 +1677,10 @@ function d365fParseSfSn(workbook){
   for(let r=headerRowIdx+1; r<aoa.length; r++){
     const row = aoa[r]||[];
     const outboundOrderId = String(row[col.outbound]||"").trim();
-    const serial = String(row[col.serial]||"").trim();
+    // D365's importer rejects SF's SN-report barcodes as given (e.g.
+    // "2705-6615-2305-01") — strip the dashes so both the D365 import
+    // workbook and the Google Sheets paste output carry the plain digits.
+    const serial = String(row[col.serial]||"").trim().replace(/-/g, "");
     if(!outboundOrderId && !serial) continue;
     rows.push({
       sourceSheet: sheetName, sourceRow: r+1,
