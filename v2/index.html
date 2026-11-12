@@ -745,8 +745,19 @@ function normalizePhone(rawPhone, iso2){
   const code = CONFIG.callingCodes[iso2];
   let p = String(rawPhone||"").replace(/[^\d+]/g,"");
   if(!code) return p.replace(/^\+/,"");
-  if(p.startsWith("+")) p = p.slice(1);
-  else if(p.startsWith("00")) p = p.slice(2);
+  // An explicit international prefix ("+353..." / "00353...") means the number
+  // carries its own country code, which may differ from the destination's
+  // (e.g. an Irish mobile on a Swiss address). Keep that code — never prepend
+  // the destination's code to it.
+  if(p.startsWith("+") || p.startsWith("00")){
+    const digits = p.replace(/^(\+|00)/,"");
+    if(!digits.startsWith(code)){
+      const known = [...new Set(Object.values(CONFIG.callingCodes))].sort((a,b)=>b.length-a.length)
+        .find(c => digits.startsWith(c));
+      return known ? `${known} ${digits.slice(known.length)}` : digits;
+    }
+    p = digits;
+  }
   const alreadyHasCode = p.startsWith(code) && (code !== "1" || p.length === 11);
   if(alreadyHasCode) p = p.slice(code.length);
   else if(p.startsWith("0")) p = p.slice(1);
