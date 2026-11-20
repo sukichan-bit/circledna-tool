@@ -548,6 +548,20 @@ function parseCSV(text){
   if(rows.length && rows[rows.length-1].length===1 && rows[rows.length-1][0]==="") rows.pop();
   return rows;
 }
+// Excel turns unit numbers like "03-22" into dates ("Mar-22") if the CSV was ever
+// opened/saved there. "Shipping Street" (= Address1 + ", " + Address2) keeps the
+// original text, so when Address2 looks like a mangled date, take it from Street.
+const MANGLED_DATE_RE = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*-\d{1,4}|\d{1,2}-(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)$/i;
+function recoverMangledAddr2(addr2, addr1, street){
+  const a2 = (addr2||"").trim();
+  if(!a2 || !MANGLED_DATE_RE.test(a2)) return addr2;
+  const a1 = (addr1||"").trim(), st = (street||"").trim();
+  if(a1 && st.startsWith(a1)){
+    const rest = st.slice(a1.length).replace(/^[\s,]+/,"").trim();
+    if(rest) return rest;
+  }
+  return addr2;
+}
 let SHOPIFY_RAW_HEADER = null;
 function shopifyCsvToOrders(text){
   const rows = parseCSV(text);
@@ -557,7 +571,7 @@ function shopifyCsvToOrders(text){
     name: idx("Name"), email: idx("Email"), finStatus: idx("Financial Status"), paidAt: idx("Paid at"),
     createdAt: idx("Created at"), lineQty: idx("Lineitem quantity"), lineSku: idx("Lineitem sku"),
     lineName: idx("Lineitem name"),
-    shipName: idx("Shipping Name"), shipAddr1: idx("Shipping Address1"), shipAddr2: idx("Shipping Address2"),
+    shipName: idx("Shipping Name"), shipStreet: idx("Shipping Street"), shipAddr1: idx("Shipping Address1"), shipAddr2: idx("Shipping Address2"),
     shipCompany: idx("Shipping Company"), shipCity: idx("Shipping City"), shipZip: idx("Shipping Zip"),
     shipProvince: idx("Shipping Province"), shipCountry: idx("Shipping Country"), shipPhone: idx("Shipping Phone"),
     cancelledAt: idx("Cancelled at"), noteAttributes: idx("Note Attributes"),
@@ -575,7 +589,8 @@ function shopifyCsvToOrders(text){
         name, email: row[col.email]||"", financialStatus: (row[col.finStatus]||"").toLowerCase(),
         paidAt: row[col.paidAt]||"", createdAt: row[col.createdAt]||"",
         cancelledAt: row[col.cancelledAt]||"",
-        shipName: row[col.shipName]||"", shipAddr1: row[col.shipAddr1]||"", shipAddr2: row[col.shipAddr2]||"",
+        shipName: row[col.shipName]||"", shipAddr1: row[col.shipAddr1]||"",
+        shipAddr2: recoverMangledAddr2(row[col.shipAddr2]||"", row[col.shipAddr1]||"", col.shipStreet>=0 ? (row[col.shipStreet]||"") : ""),
         shipCompany: row[col.shipCompany]||"", shipCity: row[col.shipCity]||"", shipZip: (row[col.shipZip]||"").replace(/^'/,""),
         shipProvince: row[col.shipProvince]||"", shipCountry: (row[col.shipCountry]||"").trim(), shipPhone: row[col.shipPhone]||"",
         discountCode: row[col.discountCode]||"", shippingMethod: row[col.shippingMethod]||"",
@@ -736,8 +751,19 @@ function normalizePhone(rawPhone, iso2){
   const code = CONFIG.callingCodes[iso2];
   let p = String(rawPhone||"").replace(/[^\d+]/g,"");
   if(!code) return p.replace(/^\+/,"");
-  if(p.startsWith("+")) p = p.slice(1);
-  else if(p.startsWith("00")) p = p.slice(2);
+  // An explicit international prefix ("+353..." / "00353...") means the number
+  // carries its own country code, which may differ from the destination's
+  // (e.g. an Irish mobile on a Swiss address). Keep that code — never prepend
+  // the destination's code to it.
+  if(p.startsWith("+") || p.startsWith("00")){
+    const digits = p.replace(/^(\+|00)/,"");
+    if(!digits.startsWith(code)){
+      const known = [...new Set(Object.values(CONFIG.callingCodes))].sort((a,b)=>b.length-a.length)
+        .find(c => digits.startsWith(c));
+      return known ? `${known} ${digits.slice(known.length)}` : digits;
+    }
+    p = digits;
+  }
   const alreadyHasCode = p.startsWith(code) && (code !== "1" || p.length === 11);
   if(alreadyHasCode) p = p.slice(code.length);
   else if(p.startsWith("0")) p = p.slice(1);
