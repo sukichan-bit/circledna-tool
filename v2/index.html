@@ -417,6 +417,9 @@ const DEFAULT_CONFIG = {
     RUS:"RU",UKR:"UA",ROU:"RO",HUN:"HU",BGR:"BG",HRV:"HR",SVK:"SK",
     SVN:"SI",EST:"EE",LVA:"LV",LTU:"LT",ISL:"IS",LUX:"LU",MLT:"MT"
   },
+  // EU27 member states (ISO2) — UK excluded post-Brexit; CH/NO/IS/GI are
+  // European but not EU members, so deliberately left out.
+  euCountries: ["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"],
   manualFedex: ["ID","IN","JP","KR","PH"],
   manualDhl: ["AE","AU","CA","CY","CZ","ES","GI","IL","JO","MA","NZ","OM","PL","SA"],
   suspended: ["KR"],
@@ -475,7 +478,10 @@ const DEFAULT_CONFIG = {
     SA: { purpose: "Personal, not for resale", desc: "Plastic tube in paper box" }
   },
   fedexRouteConfig: {
-    "INTL-FEDEX": { description: "Plastic Tube in Paper Box", hsCode: 39269090, countryOfManufacture: "HK", purposeOfShipment: 1 },
+    // descriptionEu is used in place of description (column U / "Description
+    // 1") for orders to an EU country, per CONFIG.euCountries — everywhere
+    // this config's description is written, not just the Intl-FedEx file.
+    "INTL-FEDEX": { description: "Plastic Tube in Paper Box", descriptionEu: "Plastic Tube in Paper Box. M-PID: PRE-FG-000021 NS-PID: PRE-FG-000021 S-PID: 0754590260572", hsCode: 39269090, countryOfManufacture: "HK", purposeOfShipment: 1 },
     "MY-FEDEX": { description: "Empty Tube For sample collection and not for diagnostic", hsCode: "3926.90.9900", countryOfManufacture: "HK", purposeOfShipment: 1 },
     "US-FEDEX": { description: "Empty and unused plastic tube for DNA/RNA collection (for personal use only FDA IUC 100.000)(HTS:3926.90.99.10  MID:USPUR31GUI)", hsCode: 39269090, countryOfManufacture: "US", purposeOfShipment: 1,
       mid: "Puritan Medical Products Co LLC Manufacturer Address: 31 School Street, P.O.Box 149, Guilford, Maine 04443, USA." },
@@ -740,6 +746,13 @@ function normalizePhone(rawPhone, iso2){
 function shipmentReferenceForSku(sku, country){
   const base = CONFIG.skuToShipmentReference[sku] || "Circle Exome Premium";
   return country === "JP" ? `${base}(JP)` : base;
+}
+// EU-destination orders need the M-PID/NS-PID/S-PID line in "Description 1"
+// (column U) wherever this route config's description is written — the
+// Intl-FedEx file and, for the handful of EU countries routed to
+// MANUAL-DHL instead (CY/CZ/ES/PL), the DHL manual file too.
+function outboundDescriptionForCountry(rc, country){
+  return CONFIG.euCountries.includes(country) ? (rc.descriptionEu || rc.description) : rc.description;
 }
 function extractTaxId(so){
   if(!so || !so.noteAttributes) return "";
@@ -1043,7 +1056,7 @@ function buildManualRows(records, route){
         d.shopifyRef, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
         so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
         textSafe(so?so.shipZip:""), normalizePhone(rec.phone, rec.country), so?so.email:"",
-        rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
+        outboundDescriptionForCountry(rc, rec.country), rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
         rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y",
         "", "", "",
         dhl.purpose, dhl.desc
@@ -1152,7 +1165,7 @@ function fedexRows(records, route, header, includeMid, wantNoInventory){
           txnId, "Circle2", "2P", "2", "KGS", "1", "661486660", "1", "661486660", "1", "USD", shipmentReferenceForSku(d.itemNumber, rec.country),
           so?so.shipName:"", effFedexAddr(rec).line1, effFedexAddr(rec).line2, so?so.shipCity:"", rec.country||"",
           textSafe(so?so.shipZip:""), normalizePhone(rec.phone, rec.country), so?so.email:"",
-          rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
+          route==="INTL-FEDEX" ? outboundDescriptionForCountry(rc, rec.country) : rc.description, rc.hsCode, rc.countryOfManufacture, 1, 20, "Pcs", "Y", "6", "Y", "661486660",
           rc.purposeOfShipment, "5", "N", "", "0", "NO EEI 30.37(a)", extractTaxId(so), "Y"
         ];
         if(includeMid) row.push(rc.mid || "");
