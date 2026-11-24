@@ -122,6 +122,33 @@
           <button id="btnProcess" disabled style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:11px 22px;font-size:13px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);opacity:0.4;">Process orders</button>
         </div>
       </div>
+
+      <div style="background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);">
+        <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">One-off held orders</h2>
+        <div style="color:var(--fg2);font-size:13px;margin-bottom:4px;">For an order you're deliberately leaving out of the D365 upload (e.g. it's on hold pending a specific ship date) but still need to ship that day. Saved only in this browser's local storage — never written into the app's source code or any shared file — and automatically merged in only when you process the matching date below. Wrong browser/computer tomorrow means it won't be there, so add it from the machine you'll actually process with.</div>
+        <div style="color:var(--status-urgent);font-size:12px;margin-bottom:14px;font-weight:600;">⚠ This still skips the normal D365 eligibility checks (payment status, order status) — double-check the order in D365 before relying on it.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px;">
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Ship date (processing date)</label><input type="text" id="oneOffDate" placeholder="YYYY-MM-DD" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Shopify reference</label><input type="text" id="oneOffRef" placeholder="DNA-XXXXX" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">SKU</label><select id="oneOffSku" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></select></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Quantity</label><input type="text" id="oneOffQty" placeholder="1" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Country code (ISO2)</label><input type="text" id="oneOffCountry" placeholder="SG" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Recipient name</label><input type="text" id="oneOffName" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Address line 1</label><input type="text" id="oneOffAddr1" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Address line 2</label><input type="text" id="oneOffAddr2" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">City</label><input type="text" id="oneOffCity" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Zip</label><input type="text" id="oneOffZip" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Phone</label><input type="text" id="oneOffPhone" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Email</label><input type="text" id="oneOffEmail" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+          <div><label style="display:block;font-size:11px;color:var(--fg2);margin-bottom:3px;">Note (optional)</label><input type="text" id="oneOffNote" style="width:100%;font-family:var(--font-sans);font-size:12.5px;padding:7px 9px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-page);color:var(--fg1);box-sizing:border-box;"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+          <button id="btnOneOffAdd" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Save one-off order</button>
+        </div>
+        <div style="max-height:280px;overflow:auto;border:1px solid var(--border-soft);border-radius:10px;">
+          <table id="oneOffTable" style="border-collapse:collapse;width:100%;font-size:12px;font-family:var(--font-sans);"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
     </section>
 
     <!-- ========== REVIEW ========== -->
@@ -2777,11 +2804,99 @@ wireDropzone("dz-shopify","file-shopify", async files=>{
     `Shopify: ${n} orders loaded from ${shopifyFileNames.length} file${shopifyFileNames.length===1?"":"s"}.`;
   checkReady();
 });
+/* ---- One-off held orders: saved only in this browser's local storage,
+   never in the app's source — merged into STATE.records at process time
+   for whichever processing date they're tagged with, and only that date. ---- */
+function oneOffLoad(){
+  try{ return JSON.parse(localStorage.getItem("circledna_oneoff_orders")||"[]"); }catch(e){ return []; }
+}
+function oneOffSave(list){ localStorage.setItem("circledna_oneoff_orders", JSON.stringify(list)); }
+function oneOffToRecord(o){
+  const so = {
+    shipName: o.shipName||"", shipAddr1: o.shipAddr1||"", shipAddr2: o.shipAddr2||"",
+    shipCity: o.shipCity||"", shipZip: o.shipZip||"", shipCountry: o.country||"",
+    shipPhone: o.phone||"", email: o.email||"", financialStatus: "paid", cancelledAt: null, noteAttributes: ""
+  };
+  const routing = routeForCountry(o.country, CONFIG);
+  return {
+    d365: { shopifyRef: o.shopifyRef, itemNumber: o.sku, productName: CONFIG.skuToShipmentReference[o.sku]||o.sku, country: o.country, status: "Open order" },
+    shopify: so,
+    issues: [`One-off manual order, not in the D365 upload — added for ${o.date}${o.note?`: ${o.note}`:""}`],
+    kitQty: Math.max(Number(o.quantity)||1, 1),
+    country: o.country, noInventory: CONFIG.noInventorySkus.includes(o.sku),
+    route: routing.route,
+    phone: so.shipPhone,
+    fedexAddr: splitAddressForFedex(so.shipAddr1, so.shipAddr2),
+    status: routing.route === "HOLD" ? "HOLD" : "READY",
+    override: { released: false, note: "", addr1: null, addr2: null },
+    oneOff: true
+  };
+}
+function mergeOneOffOrders(date, records){
+  for(const o of oneOffLoad()){
+    if(o.date !== date) continue;
+    if(records.some(r=>r.d365.shopifyRef === o.shopifyRef)) continue; // already in the real D365 upload — don't duplicate
+    records.push(oneOffToRecord(o));
+  }
+}
+function renderOneOffSkuOptions(){
+  const sel = document.getElementById("oneOffSku");
+  sel.innerHTML = Object.keys(CONFIG.skuToShipmentReference).map(sku=>`<option value="${sku}">${sku} — ${CONFIG.skuToShipmentReference[sku]}</option>`).join("");
+}
+function renderOneOffTable(){
+  const list = oneOffLoad();
+  const tbody = document.querySelector("#oneOffTable tbody");
+  document.querySelector("#oneOffTable thead").innerHTML = `<tr><th style="${TABLE_TH}">Ship date</th><th style="${TABLE_TH}">Ref</th><th style="${TABLE_TH}">SKU</th><th style="${TABLE_TH}">Country</th><th style="${TABLE_TH}">Recipient</th><th style="${TABLE_TH}"></th></tr>`;
+  if(!list.length){ tbody.innerHTML = `<tr><td style="${TABLE_TD}" colspan="6">No one-off orders saved.</td></tr>`; return; }
+  tbody.innerHTML = list.map((o,i)=>`<tr>
+    <td style="${TABLE_TD_NOWRAP}">${o.date}</td><td style="${TABLE_TD_NOWRAP}">${o.shopifyRef}</td><td style="${TABLE_TD_NOWRAP}">${o.sku}</td>
+    <td style="${TABLE_TD_NOWRAP}">${o.country}</td><td style="${TABLE_TD}">${o.shipName}</td>
+    <td style="${TABLE_TD}"><button data-oneoff-del="${i}" style="${BTN_SMALL}background:transparent;color:var(--status-urgent);border:1.5px solid var(--status-urgent);">Delete</button></td>
+  </tr>`).join("");
+  tbody.querySelectorAll("[data-oneoff-del]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const list2 = oneOffLoad();
+      list2.splice(Number(btn.dataset.oneoffDel), 1);
+      oneOffSave(list2);
+      renderOneOffTable();
+    });
+  });
+}
+document.getElementById("btnOneOffAdd").addEventListener("click", ()=>{
+  const o = {
+    date: document.getElementById("oneOffDate").value.trim(),
+    shopifyRef: document.getElementById("oneOffRef").value.trim(),
+    sku: document.getElementById("oneOffSku").value,
+    quantity: document.getElementById("oneOffQty").value.trim() || "1",
+    country: document.getElementById("oneOffCountry").value.trim().toUpperCase(),
+    shipName: document.getElementById("oneOffName").value.trim(),
+    shipAddr1: document.getElementById("oneOffAddr1").value.trim(),
+    shipAddr2: document.getElementById("oneOffAddr2").value.trim(),
+    shipCity: document.getElementById("oneOffCity").value.trim(),
+    shipZip: document.getElementById("oneOffZip").value.trim(),
+    phone: document.getElementById("oneOffPhone").value.trim(),
+    email: document.getElementById("oneOffEmail").value.trim(),
+    note: document.getElementById("oneOffNote").value.trim()
+  };
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(o.date)){ toast("Ship date must be YYYY-MM-DD"); return; }
+  if(!o.shopifyRef){ toast("Enter the Shopify reference"); return; }
+  if(!/^[A-Z]{2}$/.test(o.country)){ toast("Country code must be a 2-letter ISO code, e.g. SG"); return; }
+  if(!o.shipName || !o.shipAddr1 || !o.shipCity){ toast("Recipient name, address line 1 and city are required"); return; }
+  const list = oneOffLoad();
+  list.push(o);
+  oneOffSave(list);
+  renderOneOffTable();
+  ["oneOffDate","oneOffRef","oneOffQty","oneOffCountry","oneOffName","oneOffAddr1","oneOffAddr2","oneOffCity","oneOffZip","oneOffPhone","oneOffEmail","oneOffNote"].forEach(id=>document.getElementById(id).value="");
+  toast(`Saved — will auto-include on ${o.date}`);
+});
+renderOneOffSkuOptions();
+renderOneOffTable();
 document.getElementById("btnProcess").addEventListener("click", ()=>{
   const date = document.getElementById("processingDate").value.trim();
   if(!date){ toast("Enter a processing date first"); return; }
   document.getElementById("dateLabel").textContent = "Processing date: "+date;
   STATE.records = buildRecords(uploaded.d365, uploaded.shopify, CONFIG);
+  mergeOneOffOrders(date, STATE.records);
   STATE.records.sort((a,b) => orderNumForSort(a.d365.shopifyRef) - orderNumForSort(b.d365.shopifyRef));
   STATE.shopifyOrders = uploaded.shopify;
   STATE.processed = true;
