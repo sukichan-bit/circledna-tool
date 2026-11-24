@@ -194,6 +194,7 @@
       <div style="background:var(--bg-card);border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:24px;margin-bottom:16px;box-shadow:var(--shadow-sm);">
         <h2 style="font-family:var(--font-display);font-size:20px;color:var(--fg-heading);margin:0 0 4px;font-weight:400;">Downloads</h2>
         <div style="color:var(--fg2);font-size:13px;margin-bottom:14px;">Generating a file does not mark it dispatched — use the confirm button after you've actually handed the file to the warehouse / carrier.</div>
+        <div id="exportReminder" style="display:none;background:var(--status-urgent-bg);border:1px solid var(--status-urgent);border-radius:10px;padding:12px 16px;margin-bottom:16px;color:var(--status-urgent);font-size:13px;font-weight:600;"></div>
         <div id="exportList"></div>
         <div style="display:flex;justify-content:flex-end;margin-top:16px;">
           <button data-nav="resolve" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:10px 20px;font-size:13px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">← Back: Resolve</button>
@@ -2604,8 +2605,23 @@ function renderResolve(){
     });
   });
 }
+// Date-gated manual-order reminders shown on the Downloads page. Add an
+// entry here for any held order that needs a one-time manual add on a
+// specific processing date — delete the entry once that date has passed,
+// it serves no purpose afterward.
+const EXPORT_REMINDERS = [
+  { date: "2026-11-25", text: "⚠ Reminder: manually add DNA-16484 to today's Intl-FedEx file before dispatching — it's a held order deliberately left out of the D365 upload for today." }
+];
+function renderExportReminder(date){
+  const el = document.getElementById("exportReminder");
+  const hit = EXPORT_REMINDERS.find(r => r.date === date);
+  if(!hit){ el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.textContent = hit.text;
+}
 function renderExport(){
   const date = document.getElementById("processingDate").value.trim() || "unknown-date";
+  renderExportReminder(date);
   const items = [
     { key:"sf", label:"HK–SF", filename:`${date} orders for SF.xlsx`, build:()=>[["test", buildSfExport(STATE.records, CONFIG)]] },
     { key:"joborders", label:"Job orders 2026", filename:`Job orders ${date}.xlsx`, build:()=>[["D365", buildJobOrderExport(STATE.records)]] },
