@@ -145,8 +145,13 @@
         <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
           <button id="btnOneOffAdd" style="background:var(--im8-red-algae);color:#fff;border:none;border-radius:999px;padding:9px 18px;font-size:12.5px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Save one-off order</button>
         </div>
-        <div style="max-height:280px;overflow:auto;border:1px solid var(--border-soft);border-radius:10px;">
+        <div style="max-height:280px;overflow:auto;border:1px solid var(--border-soft);border-radius:10px;margin-bottom:14px;">
           <table id="oneOffTable" style="border-collapse:collapse;width:100%;font-size:12px;font-family:var(--font-sans);"><thead></thead><tbody></tbody></table>
+        </div>
+        <div style="color:var(--fg2);font-size:12px;margin-bottom:8px;">Using a different computer to process orders than the one you saved this on? Export the list here and import it on that computer before processing — the file is yours to carry (USB drive, your own cloud storage, etc.); it isn't uploaded or stored by this tool anywhere.</div>
+        <div style="display:flex;gap:8px;">
+          <button id="btnOneOffExport" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:7px 16px;font-size:12px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Export one-off orders JSON</button>
+          <button id="btnOneOffImport" style="background:transparent;color:var(--fg-heading);border:1.5px solid var(--im8-burgundy);border-radius:999px;padding:7px 16px;font-size:12px;font-weight:600;letter-spacing:var(--track-cta);text-transform:uppercase;cursor:pointer;font-family:var(--font-sans);">Import one-off orders JSON</button>
         </div>
       </div>
     </section>
@@ -2888,6 +2893,48 @@ document.getElementById("btnOneOffAdd").addEventListener("click", ()=>{
   renderOneOffTable();
   ["oneOffDate","oneOffRef","oneOffQty","oneOffCountry","oneOffName","oneOffAddr1","oneOffAddr2","oneOffCity","oneOffZip","oneOffPhone","oneOffEmail","oneOffNote"].forEach(id=>document.getElementById(id).value="");
   toast(`Saved — will auto-include on ${o.date}`);
+});
+document.getElementById("btnOneOffExport").addEventListener("click", ()=>{
+  const list = oneOffLoad();
+  if(!list.length){ toast("No one-off orders saved yet"); return; }
+  download("circledna-oneoff-orders.json", new Blob([JSON.stringify(list,null,2)], {type:"application/json"}));
+});
+// Merges imported one-off orders into what's already saved, keyed by
+// date+ref so re-importing the same file (or syncing between two laptops
+// that both added entries) never duplicates a row. Returns how many of
+// the imported entries were new.
+function oneOffImportMerge(jsonText){
+  const imported = JSON.parse(jsonText);
+  if(!Array.isArray(imported)) throw new Error("not a list");
+  const existing = oneOffLoad();
+  const key = o => `${o.date}|${o.shopifyRef}`;
+  const existingKeys = new Set(existing.map(key));
+  let added = 0;
+  for(const o of imported){
+    if(!o || !o.date || !o.shopifyRef) continue;
+    if(existingKeys.has(key(o))) continue; // already have this date+ref — don't duplicate
+    existing.push(o);
+    existingKeys.add(key(o));
+    added++;
+  }
+  oneOffSave(existing);
+  return { added, total: imported.length };
+}
+document.getElementById("btnOneOffImport").addEventListener("click", ()=>{
+  const input = document.createElement("input");
+  input.type = "file"; input.accept = ".json";
+  input.onchange = ()=>{
+    const reader = new FileReader();
+    reader.onload = e=>{
+      try{
+        const { added, total } = oneOffImportMerge(e.target.result);
+        renderOneOffTable();
+        toast(`Imported ${added} new one-off order(s) (${total - added} already present, skipped)`);
+      }catch(err){ toast("Invalid one-off orders JSON"); }
+    };
+    reader.readAsText(input.files[0]);
+  };
+  input.click();
 });
 renderOneOffSkuOptions();
 renderOneOffTable();
