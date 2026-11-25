@@ -1961,17 +1961,32 @@ function d365fRecomputeBatchIssue(row){
   row.coreIssues = row.issues.filter(i=>!row.batchIssues.includes(i));
   row.pasteReady = row.coreIssues.length === 0;
 }
-// Re-checks the two Manual-mode-only blocking conditions (missing SKU,
-// unclassified non-standard AWB) after an operator edits the SKU or
-// dispatch-type field directly in the review table.
-function d365fRecomputeManualIssues(row){
-  row.issues = row.issues.filter(i=>!i.startsWith("Could not resolve a SKU for order") && !i.includes("doesn't look like a standard tracking number"));
-  if(row.salesOrder && !row.sku){
-    row.issues.push(`Could not resolve a SKU for order "${row.salesOrder}" from the product description "${row.productDescription}" — enter the correct SKU manually`);
+// Re-checks every matching-related blocking condition (D365 order not
+// resolved, SKU not resolved, Manual mode's unclassified non-standard AWB)
+// after an operator edits the D365 order, SKU or dispatch-type field
+// directly in the review table — any carrier, not just Manual mode. A row
+// whose Job Order match failed entirely (e.g. a held order left out of
+// today's Job Order file) can be released this way without needing the
+// Job Order file to contain it.
+function d365fRecomputeMatchIssues(row){
+  row.issues = row.issues.filter(i=>
+    !i.includes("No matching Job Order record") &&
+    !i.includes("different SKUs on the Job Order file") &&
+    !i.includes("could not resolve a SKU from product description") &&
+    !i.startsWith("Could not resolve a SKU for order") &&
+    !i.startsWith("D365 order not resolved for reference") &&
+    !i.startsWith("SKU not resolved for order") &&
+    !i.includes("doesn't look like a standard tracking number")
+  );
+  if(!row.salesOrder){
+    row.issues.push(`D365 order not resolved for reference "${row.rawRef}" — enter it manually`);
+  } else if(!row.sku){
+    row.issues.push(`SKU not resolved for order "${row.salesOrder}" — enter it manually`);
   }
   if(row.needsDispatchType && !row.dispatchType){
     row.issues.push(`AWB/reference "${row.awb}" doesn't look like a standard tracking number — classify it (courier tracking / local delivery / collection / other dispatch reference) before relying on this row`);
   }
+  if(row.salesOrder && row.serial) row.serialFingerprint = `${row.salesOrder}|${row.serial}`;
   d365fRecomputeBatchIssue(row);
 }
 function d365fMatchAndAssign(){
@@ -2374,11 +2389,10 @@ function d365fRenderTable(){
     const awbCell = r.consolidatedAwb && r.consolidatedAwb !== r.awb
       ? `${r.awb||"—"}<br><span style="color:var(--fg2);font-size:11px;">D365 AWB: ${r.consolidatedAwb}</span>`
       : (r.awb||"—");
-    const skuCell = isManual
-      ? `<input type="text" data-row-sku="${i}" value="${(r.sku||"").replace(/"/g,'&quot;')}" placeholder="enter SKU" style="width:120px;font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid ${r.sku?'var(--border-strong)':'var(--status-urgent)'};border-radius:6px;background:var(--bg-page);color:var(--fg1);">`
-      : (r.sku||"—");
+    const soCell = `<input type="text" data-row-salesorder="${i}" value="${(r.salesOrder||"").replace(/"/g,'&quot;')}" placeholder="enter D365 order" style="width:130px;font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid ${r.salesOrder?'var(--border-strong)':'var(--status-urgent)'};border-radius:6px;background:var(--bg-page);color:var(--fg1);">`;
+    const skuCell = `<input type="text" data-row-sku="${i}" value="${(r.sku||"").replace(/"/g,'&quot;')}" placeholder="enter SKU" style="width:120px;font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid ${r.sku?'var(--border-strong)':'var(--status-urgent)'};border-radius:6px;background:var(--bg-page);color:var(--fg1);">`;
     return `<tr>
-      <td style="${TABLE_TD}">${refCell}</td><td style="${TABLE_TD_NOWRAP}">${r.salesOrder||"—"}</td><td style="${TABLE_TD_NOWRAP}">${skuCell}</td>
+      <td style="${TABLE_TD}">${refCell}</td><td style="${TABLE_TD_NOWRAP}">${soCell}</td><td style="${TABLE_TD_NOWRAP}">${skuCell}</td>
       <td style="${TABLE_TD_NOWRAP}">${r.shippingDateText||"—"}</td><td style="${TABLE_TD}">${awbCell}</td>
       ${isManual?`<td style="${TABLE_TD}"><select data-row-dispatchtype="${i}" style="font-family:var(--font-sans);font-size:12px;padding:5px 7px;border:1px solid ${r.needsDispatchType&&!r.dispatchType?'var(--status-urgent)':'var(--border-strong)'};border-radius:6px;background:var(--bg-page);color:var(--fg1);">${DISPATCH_TYPES.map(t=>`<option value="${t}" ${r.dispatchType===t?"selected":""}>${t||"— select —"}</option>`).join("")}</select></td>`:""}
       ${showReturnWaybill?`<td style="${TABLE_TD_NOWRAP}">${r.returnWaybill||"—"}${r.returnWaybillAmbiguous?`<br><span style="color:var(--status-urgent);font-size:11px;">ambiguous match</span>`:""}</td>`:""}
@@ -2398,12 +2412,37 @@ function d365fRenderTable(){
       d365fRenderAll();
     });
   });
+  document.querySelectorAll("[data-row-salesorder]").forEach(input=>{
+    input.addEventListener("change", ()=>{
+      const row = D365F.matched[Number(input.dataset.rowSalesorder)];
+      row.salesOrder = input.value.trim();
+      row.matchMethod = "manual-override";
+      row.matchNote = (row.matchNote?row.matchNote+"; ":"")+"D365 order manually entered";
+      // The Job Order file might still have a usable SKU for this order
+      // number even though the original reference lookup failed — try it
+      // before falling back to a fully manual SKU entry too.
+      if(!row.sku && D365F.jobOrderIndex){
+        const joEntries = [...D365F.jobOrderIndex.values()].flat().filter(c=>c.salesOrder===row.salesOrder);
+        const distinctSkus = [...new Set(joEntries.map(c=>c.sku))];
+        if(distinctSkus.length === 1){ row.sku = distinctSkus[0]; row.skuSource = "Job Order file"; }
+      }
+      d365fRecomputeMatchIssues(row);
+      d365fRenderAll();
+    });
+  });
   document.querySelectorAll("[data-row-sku]").forEach(input=>{
     input.addEventListener("change", ()=>{
       const row = D365F.matched[Number(input.dataset.rowSku)];
       row.sku = input.value.trim();
       row.skuSource = row.sku ? "Manual entry" : "";
-      d365fRecomputeManualIssues(row);
+      // Pick up the configured default batch for this SKU, same as a
+      // normal match would — but only if nothing's already in the batch
+      // field, so a prior edit there is never silently overwritten.
+      if(row.sku && !row.batch){
+        const preferredBatch = D365F.defaultBatches[D365F.carrier][row.sku];
+        if(preferredBatch){ row.batch = preferredBatch; row.batchSource = "Default"; }
+      }
+      d365fRecomputeMatchIssues(row);
       d365fRenderAll();
     });
   });
@@ -2411,7 +2450,7 @@ function d365fRenderTable(){
     sel.addEventListener("change", ()=>{
       const row = D365F.matched[Number(sel.dataset.rowDispatchtype)];
       row.dispatchType = sel.value;
-      d365fRecomputeManualIssues(row);
+      d365fRecomputeMatchIssues(row);
       d365fRenderAll();
     });
   });
@@ -2610,7 +2649,7 @@ function renderResolve(){
 // specific processing date — delete the entry once that date has passed,
 // it serves no purpose afterward.
 const EXPORT_REMINDERS = [
-  { date: "2026-11-25", text: "⚠ Reminder: manually add DNA-16484 to today's Intl-FedEx file before dispatching — it's a held order deliberately left out of the D365 upload for today." }
+  { date: "2026-11-26", text: "⚠ Reminder: manually add DNA-16571 to today's Intl-FedEx file before dispatching — it's a held order deliberately left out of the D365 upload for today." }
 ];
 function renderExportReminder(date){
   const el = document.getElementById("exportReminder");
